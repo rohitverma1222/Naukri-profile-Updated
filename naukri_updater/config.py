@@ -3,15 +3,30 @@ Configuration settings for Naukri Profile Automation Tool
 """
 
 import os
+import json
 from pathlib import Path
 
 # Naukri.com URLs
 NAUKRI_LOGIN_URL = "https://www.naukri.com/nlogin/login"
 NAUKRI_PROFILE_URL = "https://www.naukri.com/mnjuser/profile"
+NAUKRI_HOME_URL = "https://www.naukri.com"
 
 # Credentials (loaded from environment variables)
 NAUKRI_EMAIL = os.environ.get("NAUKRI_EMAIL", "")
 NAUKRI_PASSWORD = os.environ.get("NAUKRI_PASSWORD", "")
+
+# Cookie-based authentication (preferred method to bypass OTP)
+NAUKRI_COOKIES_JSON = os.environ.get("NAUKRI_COOKIES", "")
+
+def get_cookies():
+    """Parse cookies from environment variable."""
+    if not NAUKRI_COOKIES_JSON:
+        return None
+    try:
+        cookies = json.loads(NAUKRI_COOKIES_JSON)
+        return cookies if isinstance(cookies, list) else None
+    except json.JSONDecodeError:
+        return None
 
 # File paths
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -58,13 +73,24 @@ def validate_config():
     """Validate that required environment variables are set."""
     errors = []
     
-    if not NAUKRI_EMAIL:
-        errors.append("NAUKRI_EMAIL environment variable is not set")
+    # Check if we have cookies OR credentials
+    cookies = get_cookies()
+    has_cookies = cookies is not None and len(cookies) > 0
+    has_credentials = NAUKRI_EMAIL and NAUKRI_PASSWORD
     
-    if not NAUKRI_PASSWORD:
-        errors.append("NAUKRI_PASSWORD environment variable is not set")
+    if not has_cookies and not has_credentials:
+        errors.append(
+            "Either NAUKRI_COOKIES or both NAUKRI_EMAIL and NAUKRI_PASSWORD must be set. "
+            "NAUKRI_COOKIES is recommended to bypass OTP."
+        )
     
     if not RESUME_FILE.exists():
         errors.append(f"Resume file not found at: {RESUME_FILE}")
     
     return errors
+
+def use_cookie_auth():
+    """Check if cookie-based authentication should be used."""
+    cookies = get_cookies()
+    return cookies is not None and len(cookies) > 0
+

@@ -93,6 +93,81 @@ class NaukriUpdater:
         except Exception as e:
             logger.warning(f"Failed to take screenshot: {e}")
 
+    def load_cookies(self) -> bool:
+        """Load cookies from environment variable to bypass login."""
+        logger.info("Attempting cookie-based authentication...")
+        
+        cookies = config.get_cookies()
+        if not cookies:
+            logger.warning("No cookies available")
+            return False
+        
+        try:
+            # First navigate to the domain to set cookies
+            logger.info("Navigating to Naukri.com to set cookies...")
+            self.driver.get(config.NAUKRI_HOME_URL)
+            time.sleep(2)
+            
+            # Add each cookie
+            cookies_added = 0
+            for cookie in cookies:
+                try:
+                    # Remove problematic fields that Selenium doesn't accept
+                    cookie_clean = {
+                        'name': cookie.get('name'),
+                        'value': cookie.get('value'),
+                        'domain': cookie.get('domain', '.naukri.com'),
+                        'path': cookie.get('path', '/'),
+                    }
+                    
+                    # Only add if we have required fields
+                    if cookie_clean['name'] and cookie_clean['value']:
+                        # Handle domain - ensure it's valid for the current page
+                        if 'naukri.com' in cookie_clean.get('domain', ''):
+                            self.driver.add_cookie(cookie_clean)
+                            cookies_added += 1
+                except Exception as e:
+                    logger.debug(f"Could not add cookie {cookie.get('name')}: {e}")
+                    continue
+            
+            logger.info(f"Added {cookies_added} cookies")
+            
+            # Refresh to apply cookies
+            self.driver.refresh()
+            time.sleep(3)
+            
+            # Navigate to profile to verify we're logged in
+            self.driver.get(config.NAUKRI_PROFILE_URL)
+            time.sleep(3)
+            
+            self.take_screenshot("after_cookie_auth")
+            
+            # Check if we're on profile page (means we're logged in)
+            current_url = self.driver.current_url
+            logger.info(f"Current URL after cookie auth: {current_url}")
+            
+            if "profile" in current_url.lower() and "login" not in current_url.lower():
+                logger.info("Cookie authentication successful!")
+                return True
+            elif "login" in current_url.lower():
+                logger.warning("Redirected to login page - cookies may be expired")
+                return False
+            else:
+                # Could be on some other page, let's check if we see logged-in elements
+                try:
+                    # Look for elements that indicate we're logged in
+                    self.driver.find_element(By.CSS_SELECTOR, ".nI-gNb-drawer__icon, .user-badge, [class*='logged']")
+                    logger.info("Cookie authentication appears successful (found logged-in elements)")
+                    return True
+                except:
+                    logger.warning("Could not verify login status")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Cookie authentication failed: {e}")
+            self.take_screenshot("cookie_auth_error")
+            return False
+
     def find_element_with_fallback(self, selectors: list, description: str):
         """Try multiple selectors to find an element."""
         for selector in selectors:
@@ -446,17 +521,34 @@ class NaukriUpdater:
             return False
 
         success = False
+        logged_in = False
 
         try:
             # Setup browser
             self.setup_driver()
 
-            # Login
-            if not self.login():
-                logger.error("Login failed, aborting...")
-                return False
+            # Try cookie-based authentication first (bypasses OTP)
+            if config.use_cookie_auth():
+                logger.info("Cookie authentication is available, trying it first...")
+                logged_in = self.load_cookies()
+                if logged_in:
+                    logger.info("Successfully authenticated using cookies!")
+                else:
+                    logger.warning("Cookie authentication failed, will try password login...")
+            
+            # Fall back to password login if cookies didn't work
+            if not logged_in:
+                if config.NAUKRI_EMAIL and config.NAUKRI_PASSWORD:
+                    logger.info("Attempting password-based login...")
+                    if not self.login():
+                        logger.error("Login failed, aborting...")
+                        return False
+                    logged_in = True
+                else:
+                    logger.error("No valid authentication method available!")
+                    return False
 
-            # Navigate to profile
+            # Navigate to profile (if not already there from cookie auth)
             if not self.navigate_to_profile():
                 logger.error("Failed to navigate to profile, aborting...")
                 return False

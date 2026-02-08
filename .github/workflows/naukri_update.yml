@@ -40,6 +40,7 @@ jobs:
         env:
           NAUKRI_EMAIL: ${{ secrets.NAUKRI_EMAIL }}
           NAUKRI_PASSWORD: ${{ secrets.NAUKRI_PASSWORD }}
+          NAUKRI_COOKIES: ${{ secrets.NAUKRI_COOKIES }}
         run: |
           python -m naukri_updater.main
 
