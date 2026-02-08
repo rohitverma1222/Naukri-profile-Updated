@@ -61,16 +61,45 @@ class NaukriUpdater:
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
+        
+        # Anti-detection measures
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
+        
+        # Fix for HTTP2 protocol errors - use HTTP/1.1
+        chrome_options.add_argument("--disable-http2")
+        
+        # Additional anti-detection
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-infobars")
+        chrome_options.add_argument("--disable-notifications")
+        chrome_options.add_argument("--disable-popup-blocking")
+        chrome_options.add_argument("--ignore-certificate-errors")
+        chrome_options.add_argument("--allow-running-insecure-content")
+        
+        # Realistic user agent
         chrome_options.add_argument(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
         )
+        
+        # Language and accept headers
+        chrome_options.add_argument("--lang=en-US,en")
+        chrome_options.add_argument("--accept-lang=en-US,en;q=0.9")
 
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        # Execute stealth scripts to avoid detection
+        self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": """
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                window.chrome = {runtime: {}};
+            """
+        })
 
         # Set timeouts
         self.driver.implicitly_wait(config.IMPLICIT_WAIT)
@@ -105,8 +134,18 @@ class NaukriUpdater:
         try:
             # First navigate to the domain to set cookies
             logger.info("Navigating to Naukri.com to set cookies...")
-            self.driver.get(config.NAUKRI_HOME_URL)
-            time.sleep(2)
+            
+            # Try navigating with error handling
+            try:
+                self.driver.get(config.NAUKRI_HOME_URL)
+            except Exception as nav_error:
+                logger.warning(f"Initial navigation error (will retry): {nav_error}")
+                time.sleep(2)
+                self.driver.get(config.NAUKRI_HOME_URL)
+            
+            time.sleep(3)
+            
+            self.take_screenshot("before_cookies")
             
             # Add each cookie
             cookies_added = 0
@@ -133,12 +172,29 @@ class NaukriUpdater:
             logger.info(f"Added {cookies_added} cookies")
             
             # Refresh to apply cookies
+            time.sleep(1)
             self.driver.refresh()
-            time.sleep(3)
+            time.sleep(4)
             
-            # Navigate to profile to verify we're logged in
-            self.driver.get(config.NAUKRI_PROFILE_URL)
-            time.sleep(3)
+            self.take_screenshot("after_cookies_refresh")
+            
+            # Navigate to profile with retry logic
+            logger.info("Navigating to profile page...")
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    self.driver.get(config.NAUKRI_PROFILE_URL)
+                    time.sleep(4)
+                    break
+                except Exception as e:
+                    logger.warning(f"Profile navigation attempt {attempt + 1} failed: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                    else:
+                        # Try alternate URL
+                        logger.info("Trying alternate navigation...")
+                        self.driver.get("https://www.naukri.com/mnjuser/homepage")
+                        time.sleep(3)
             
             self.take_screenshot("after_cookie_auth")
             
@@ -149,6 +205,9 @@ class NaukriUpdater:
             if "profile" in current_url.lower() and "login" not in current_url.lower():
                 logger.info("Cookie authentication successful!")
                 return True
+            elif "homepage" in current_url.lower() or "mnjuser" in current_url.lower():
+                logger.info("Cookie authentication successful! (on homepage)")
+                return True
             elif "login" in current_url.lower():
                 logger.warning("Redirected to login page - cookies may be expired")
                 return False
@@ -156,7 +215,7 @@ class NaukriUpdater:
                 # Could be on some other page, let's check if we see logged-in elements
                 try:
                     # Look for elements that indicate we're logged in
-                    self.driver.find_element(By.CSS_SELECTOR, ".nI-gNb-drawer__icon, .user-badge, [class*='logged']")
+                    self.driver.find_element(By.CSS_SELECTOR, ".nI-gNb-drawer__icon, .user-badge, [class*='logged'], .nI-gNb-sb__plc")
                     logger.info("Cookie authentication appears successful (found logged-in elements)")
                     return True
                 except:
