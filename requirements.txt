@@ -1,0 +1,10 @@
+# Naukri Profile Automation Dependencies
+
+# Selenium for browser automation
+selenium>=4.15.0
+
+# Automatic ChromeDriver management
+webdriver-manager>=4.0.1
+
+# Environment variable management (for local testing)
+python-dotenv>=1.0.0
