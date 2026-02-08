@@ -135,92 +135,114 @@ class NaukriUpdater:
             # First navigate to the domain to set cookies
             logger.info("Navigating to Naukri.com to set cookies...")
             
-            # Try navigating with error handling
-            try:
-                self.driver.get(config.NAUKRI_HOME_URL)
-            except Exception as nav_error:
-                logger.warning(f"Initial navigation error (will retry): {nav_error}")
-                time.sleep(2)
-                self.driver.get(config.NAUKRI_HOME_URL)
-            
-            time.sleep(3)
+            self.driver.get(config.NAUKRI_HOME_URL)
+            time.sleep(5)
             
             self.take_screenshot("before_cookies")
             
-            # Add each cookie
+            # Add each cookie using Selenium
             cookies_added = 0
             for cookie in cookies:
                 try:
-                    # Remove problematic fields that Selenium doesn't accept
+                    # Clean cookie for Selenium
                     cookie_clean = {
                         'name': cookie.get('name'),
                         'value': cookie.get('value'),
-                        'domain': cookie.get('domain', '.naukri.com'),
                         'path': cookie.get('path', '/'),
                     }
                     
-                    # Only add if we have required fields
+                    # Set domain appropriately
+                    domain = cookie.get('domain', '')
+                    if domain.startswith('.'):
+                        cookie_clean['domain'] = domain
+                    
                     if cookie_clean['name'] and cookie_clean['value']:
-                        # Handle domain - ensure it's valid for the current page
-                        if 'naukri.com' in cookie_clean.get('domain', ''):
+                        try:
                             self.driver.add_cookie(cookie_clean)
                             cookies_added += 1
+                        except Exception as ce:
+                            # Try without domain
+                            try:
+                                del cookie_clean['domain']
+                                self.driver.add_cookie(cookie_clean)
+                                cookies_added += 1
+                            except:
+                                pass
                 except Exception as e:
-                    logger.debug(f"Could not add cookie {cookie.get('name')}: {e}")
                     continue
             
             logger.info(f"Added {cookies_added} cookies")
             
-            # Refresh to apply cookies
-            time.sleep(1)
-            self.driver.refresh()
-            time.sleep(4)
+            # Also set cookies via JavaScript as backup
+            try:
+                for cookie in cookies:
+                    name = cookie.get('name', '')
+                    value = cookie.get('value', '')
+                    if name and value:
+                        self.driver.execute_script(
+                            f"document.cookie = '{name}={value}; path=/; domain=.naukri.com';"
+                        )
+            except Exception as js_err:
+                logger.debug(f"JS cookie setting failed: {js_err}")
             
-            self.take_screenshot("after_cookies_refresh")
+            self.take_screenshot("after_adding_cookies")
             
-            # Navigate to profile with retry logic
-            logger.info("Navigating to profile page...")
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    self.driver.get(config.NAUKRI_PROFILE_URL)
-                    time.sleep(4)
-                    break
-                except Exception as e:
-                    logger.warning(f"Profile navigation attempt {attempt + 1} failed: {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(2)
-                    else:
-                        # Try alternate URL
-                        logger.info("Trying alternate navigation...")
-                        self.driver.get("https://www.naukri.com/mnjuser/homepage")
-                        time.sleep(3)
+            # Navigate directly to profile (skip refresh to avoid timeout)
+            logger.info("Navigating directly to profile page...")
+            try:
+                self.driver.get(config.NAUKRI_PROFILE_URL)
+                time.sleep(5)
+            except Exception as e:
+                logger.warning(f"Profile navigation error: {e}")
+                # Try homepage instead
+                self.driver.get("https://www.naukri.com/mnjuser/homepage")
+                time.sleep(5)
             
-            self.take_screenshot("after_cookie_auth")
+            self.take_screenshot("after_profile_navigation")
             
-            # Check if we're on profile page (means we're logged in)
+            # Check if we're logged in by looking at the page content
             current_url = self.driver.current_url
-            logger.info(f"Current URL after cookie auth: {current_url}")
+            page_source = self.driver.page_source.lower()
+            logger.info(f"Current URL: {current_url}")
             
-            if "profile" in current_url.lower() and "login" not in current_url.lower():
-                logger.info("Cookie authentication successful!")
-                return True
-            elif "homepage" in current_url.lower() or "mnjuser" in current_url.lower():
-                logger.info("Cookie authentication successful! (on homepage)")
-                return True
-            elif "login" in current_url.lower():
-                logger.warning("Redirected to login page - cookies may be expired")
+            # Check for login indicators in URL
+            if "login" in current_url.lower() or "nlogin" in current_url.lower():
+                logger.warning("Redirected to login - cookies are invalid or IP-bound")
+                logger.info("Note: Naukri may block cookies from different IPs for security")
                 return False
-            else:
-                # Could be on some other page, let's check if we see logged-in elements
-                try:
-                    # Look for elements that indicate we're logged in
-                    self.driver.find_element(By.CSS_SELECTOR, ".nI-gNb-drawer__icon, .user-badge, [class*='logged'], .nI-gNb-sb__plc")
-                    logger.info("Cookie authentication appears successful (found logged-in elements)")
-                    return True
-                except:
-                    logger.warning("Could not verify login status")
-                    return False
+            
+            # Check for login indicators in page
+            if "logout" in page_source or "my naukri" in page_source:
+                logger.info("Cookie authentication successful! (found logout/my naukri)")
+                return True
+            
+            # Check for profile-specific content
+            if "profile" in current_url.lower() and "edit" in page_source:
+                logger.info("Cookie authentication successful! (on profile page)")
+                return True
+            
+            # Check if we see the login/register buttons (means NOT logged in)
+            try:
+                login_btn = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='login'], button:contains('Login')")
+                if login_btn and len(login_btn) > 0:
+                    # Check if there's also a user menu (might be both visible)
+                    user_menu = self.driver.find_elements(By.CSS_SELECTOR, ".nI-gNb-drawer__icon, [class*='user'], .user-name")
+                    if user_menu and len(user_menu) > 0:
+                        logger.info("Cookie authentication appears successful")
+                        return True
+                    else:
+                        logger.warning("Not logged in - login button visible, no user menu")
+                        return False
+            except:
+                pass
+            
+            # Default: check URL patterns
+            if "mnjuser" in current_url.lower():
+                logger.info("Cookie authentication successful! (on user area)")
+                return True
+                
+            logger.warning("Could not verify login status, assuming failure")
+            return False
                     
         except Exception as e:
             logger.error(f"Cookie authentication failed: {e}")

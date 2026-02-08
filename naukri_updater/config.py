@@ -37,9 +37,9 @@ RESUME_FILE = RESUME_DIR / "resume.pdf"
 SCREENSHOTS_DIR = PROJECT_ROOT / "screenshots"
 
 # Selenium settings
-IMPLICIT_WAIT = 10  # seconds
-PAGE_LOAD_TIMEOUT = 30  # seconds
-SCRIPT_TIMEOUT = 30  # seconds
+IMPLICIT_WAIT = 15  # seconds
+PAGE_LOAD_TIMEOUT = 60  # seconds
+SCRIPT_TIMEOUT = 60  # seconds
 
 # Retry settings
 MAX_RETRIES = 3
