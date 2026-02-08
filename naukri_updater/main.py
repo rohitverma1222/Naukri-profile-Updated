@@ -93,56 +93,148 @@ class NaukriUpdater:
         except Exception as e:
             logger.warning(f"Failed to take screenshot: {e}")
 
+    def find_element_with_fallback(self, selectors: list, description: str):
+        """Try multiple selectors to find an element."""
+        for selector in selectors:
+            try:
+                if selector.startswith("//"):
+                    # XPath selector
+                    element = self.driver.find_element(By.XPATH, selector)
+                else:
+                    # CSS selector
+                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                if element:
+                    logger.info(f"Found {description} with selector: {selector}")
+                    return element
+            except NoSuchElementException:
+                continue
+            except Exception as e:
+                logger.debug(f"Selector {selector} failed: {e}")
+                continue
+        return None
+
     def login(self) -> bool:
         """Log in to Naukri.com."""
         logger.info("Navigating to Naukri login page...")
 
         try:
             self.driver.get(config.NAUKRI_LOGIN_URL)
-            time.sleep(2)  # Wait for page to fully load
+            time.sleep(3)  # Wait for page to fully load
+            
+            # Take screenshot of login page for debugging
+            self.take_screenshot("login_page")
+
+            # Multiple selectors for email input (in order of preference)
+            email_selectors = [
+                "input[placeholder='Enter Email ID / Username']",
+                "input[placeholder*='Email']",
+                "input[type='text'][name*='email']",
+                "input[type='email']",
+                "#usernameField",
+                "//input[contains(@placeholder, 'Email')]",
+                "//input[@type='text']",
+            ]
+            
+            # Multiple selectors for password input
+            password_selectors = [
+                "input[placeholder='Enter Password']",
+                "input[placeholder*='Password']",
+                "input[type='password']",
+                "#passwordField",
+                "//input[@type='password']",
+            ]
+            
+            # Multiple selectors for login button
+            login_button_selectors = [
+                "button[type='submit']",
+                "button.loginButton",
+                "button[class*='login']",
+                "input[type='submit']",
+                "//button[@type='submit']",
+                "//button[contains(text(), 'Login')]",
+            ]
 
             # Find and fill email
+            logger.info("Looking for email input...")
+            email_input = self.find_element_with_fallback(email_selectors, "email input")
+            
+            if not email_input:
+                # Try waiting for it
+                try:
+                    email_input = self.wait.until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='text'], input[type='email']"))
+                    )
+                    logger.info("Found email input via generic wait")
+                except:
+                    pass
+            
+            if not email_input:
+                logger.error("Could not find email input field")
+                self.take_screenshot("no_email_input")
+                return False
+            
             logger.info("Entering email...")
-            email_input = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, config.SELECTORS["email_input"])
-                )
-            )
             email_input.clear()
             email_input.send_keys(config.NAUKRI_EMAIL)
+            time.sleep(0.5)
 
             # Find and fill password
+            logger.info("Looking for password input...")
+            password_input = self.find_element_with_fallback(password_selectors, "password input")
+            
+            if not password_input:
+                logger.error("Could not find password input field")
+                self.take_screenshot("no_password_input")
+                return False
+            
             logger.info("Entering password...")
-            password_input = self.driver.find_element(
-                By.CSS_SELECTOR, config.SELECTORS["password_input"]
-            )
             password_input.clear()
             password_input.send_keys(config.NAUKRI_PASSWORD)
+            time.sleep(0.5)
 
-            # Click login button
+            # Find and click login button
+            logger.info("Looking for login button...")
+            login_button = self.find_element_with_fallback(login_button_selectors, "login button")
+            
+            if not login_button:
+                logger.error("Could not find login button")
+                self.take_screenshot("no_login_button")
+                return False
+            
             logger.info("Clicking login button...")
-            login_button = self.driver.find_element(
-                By.CSS_SELECTOR, config.SELECTORS["login_button"]
-            )
             login_button.click()
 
-            # Wait for login to complete (check for profile icon or redirect)
+            # Wait for login to complete
             time.sleep(5)
+            
+            # Take screenshot after login attempt
+            self.take_screenshot("after_login")
 
-            # Check if login was successful by looking for common post-login elements
+            # Check if login was successful
             current_url = self.driver.current_url
-            if "login" not in current_url.lower() or "nlogin" not in current_url.lower():
-                logger.info("Login successful!")
+            logger.info(f"Current URL after login: {current_url}")
+            
+            # Success if we're no longer on login page
+            if "login" not in current_url.lower() and "nlogin" not in current_url.lower():
+                logger.info("Login successful! (redirected away from login page)")
                 return True
-            else:
-                # Additional check - look for error messages
-                try:
-                    error_msg = self.driver.find_element(By.CSS_SELECTOR, ".error-msg, .err-msg")
-                    logger.error(f"Login failed: {error_msg.text}")
-                except NoSuchElementException:
-                    logger.info("Login appears successful (no error found)")
-                    return True
-
+            
+            # Check for error messages
+            try:
+                error_selectors = [".error-msg", ".err-msg", ".error", "[class*='error']"]
+                for sel in error_selectors:
+                    try:
+                        error_msg = self.driver.find_element(By.CSS_SELECTOR, sel)
+                        if error_msg.is_displayed() and error_msg.text:
+                            logger.error(f"Login error message: {error_msg.text}")
+                            return False
+                    except:
+                        continue
+            except:
+                pass
+            
+            # If no errors found, assume success (some pages stay on same URL)
+            logger.info("No login errors detected, assuming success")
             return True
 
         except TimeoutException:

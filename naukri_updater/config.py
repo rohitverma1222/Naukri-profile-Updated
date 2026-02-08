@@ -30,11 +30,18 @@ SCRIPT_TIMEOUT = 30  # seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
 
-# CSS Selectors for Naukri.com (may need updates if site changes)
+# CSS Selectors for Naukri.com (updated to match current site)
 SELECTORS = {
-    "email_input": "input[placeholder='Enter your active Email ID / Username']",
-    "password_input": "input[placeholder='Enter your password']",
+    # Login page selectors
+    "email_input": "input[placeholder='Enter Email ID / Username']",
+    "password_input": "input[placeholder='Enter Password']",
     "login_button": "button[type='submit']",
+    
+    # Alternative selectors (fallbacks)
+    "email_input_alt": "#usernameField",
+    "password_input_alt": "#passwordField",
+    
+    # Profile page selectors
     "profile_photo": ".nI-gNb-drawer__icon",
     "view_profile": "a[href*='/mnjuser/profile']",
     "resume_section": ".widgetHead.resumeWidget",
