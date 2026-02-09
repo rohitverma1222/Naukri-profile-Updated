@@ -32,6 +32,7 @@ from selenium.common.exceptions import (
 from webdriver_manager.chrome import ChromeDriverManager
 
 from . import config
+from .email_otp import EmailOTPReader
 
 # Configure logging
 logging.basicConfig(
@@ -269,6 +270,183 @@ class NaukriUpdater:
                 continue
         return None
 
+    def detect_otp_page(self) -> bool:
+        """Detect if we're on an OTP verification page."""
+        try:
+            page_source = self.driver.page_source.lower()
+            current_url = self.driver.current_url.lower()
+            
+            # Check for OTP indicators in page
+            otp_indicators = [
+                'otp',
+                'verification code',
+                'verify your',
+                'one time password',
+                'enter the code',
+                'we have sent',
+                'verify otp'
+            ]
+            
+            for indicator in otp_indicators:
+                if indicator in page_source:
+                    logger.info(f"Detected OTP page (found: '{indicator}')")
+                    return True
+            
+            # Check URL for OTP patterns
+            if 'otp' in current_url or 'verify' in current_url:
+                logger.info("Detected OTP page from URL")
+                return True
+            
+            # Check for OTP input field
+            otp_input_selectors = [
+                "input[placeholder*='OTP']",
+                "input[placeholder*='otp']",
+                "input[name*='otp']",
+                "input[id*='otp']",
+                "input[type='tel']",
+                "input[maxlength='6']",
+            ]
+            
+            for selector in otp_input_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        logger.info(f"Detected OTP input field: {selector}")
+                        return True
+                except:
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error detecting OTP page: {e}")
+            return False
+
+    def handle_otp(self) -> bool:
+        """Handle OTP verification by reading OTP from email."""
+        logger.info("=" * 50)
+        logger.info("OTP Verification Required")
+        logger.info("=" * 50)
+        
+        # Check if email credentials are configured
+        if not config.EMAIL_ADDRESS or not config.EMAIL_APP_PASSWORD:
+            logger.error("Email credentials not configured for OTP reading!")
+            logger.error("Set EMAIL_ADDRESS and EMAIL_APP_PASSWORD secrets")
+            return False
+        
+        self.take_screenshot("otp_page_detected")
+        
+        # Wait a moment for OTP email to arrive
+        logger.info("Waiting for OTP email to arrive...")
+        time.sleep(10)  # Give Naukri time to send the email
+        
+        # Initialize email OTP reader
+        email_reader = EmailOTPReader(
+            email_address=config.EMAIL_ADDRESS,
+            app_password=config.EMAIL_APP_PASSWORD
+        )
+        
+        try:
+            # Try to get OTP from email
+            logger.info(f"Checking email for OTP (timeout: {config.OTP_TIMEOUT}s)...")
+            otp = email_reader.wait_for_otp(
+                sender_filter="naukri",
+                timeout_seconds=config.OTP_TIMEOUT,
+                poll_interval=config.OTP_POLL_INTERVAL
+            )
+            
+            if not otp:
+                logger.error("Could not get OTP from email")
+                self.take_screenshot("otp_not_found")
+                return False
+            
+            logger.info(f"Got OTP from email: {otp}")
+            
+            # Find OTP input field
+            otp_input_selectors = [
+                "input[placeholder*='OTP']",
+                "input[placeholder*='otp']",
+                "input[name*='otp']",
+                "input[id*='otp']",
+                "input[type='tel']",
+                "input[maxlength='6']",
+                "input[type='number']",
+            ]
+            
+            otp_input = self.find_element_with_fallback(otp_input_selectors, "OTP input")
+            
+            if not otp_input:
+                # Try to find any visible input
+                try:
+                    inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='tel'], input[type='number']")
+                    for inp in inputs:
+                        if inp.is_displayed():
+                            otp_input = inp
+                            break
+                except:
+                    pass
+            
+            if not otp_input:
+                logger.error("Could not find OTP input field")
+                self.take_screenshot("otp_input_not_found")
+                return False
+            
+            # Enter OTP
+            logger.info("Entering OTP...")
+            otp_input.clear()
+            otp_input.send_keys(otp)
+            time.sleep(1)
+            
+            self.take_screenshot("otp_entered")
+            
+            # Find and click verify/submit button
+            verify_button_selectors = [
+                "button[type='submit']",
+                "button:contains('Verify')",
+                "button:contains('Submit')",
+                "button[class*='verify']",
+                "button[class*='submit']",
+                "//button[contains(text(), 'Verify')]",
+                "//button[contains(text(), 'Submit')]",
+                "//button[@type='submit']",
+            ]
+            
+            verify_button = self.find_element_with_fallback(verify_button_selectors, "verify button")
+            
+            if verify_button:
+                logger.info("Clicking verify button...")
+                verify_button.click()
+                time.sleep(5)
+            else:
+                # Try pressing Enter
+                logger.info("No verify button found, pressing Enter...")
+                otp_input.send_keys("\n")
+                time.sleep(5)
+            
+            self.take_screenshot("after_otp_submit")
+            
+            # Check if OTP was successful
+            current_url = self.driver.current_url.lower()
+            if 'login' not in current_url and 'otp' not in current_url and 'verify' not in current_url:
+                logger.info("OTP verification successful!")
+                return True
+            
+            # Check for errors
+            page_source = self.driver.page_source.lower()
+            if 'invalid' in page_source or 'wrong' in page_source or 'expired' in page_source:
+                logger.error("OTP verification failed - invalid or expired OTP")
+                return False
+            
+            logger.info("OTP submitted, assuming success")
+            return True
+            
+        except Exception as e:
+            logger.error(f"OTP handling failed: {e}")
+            self.take_screenshot("otp_error")
+            return False
+        finally:
+            email_reader.disconnect()
+
     def login(self) -> bool:
         """Log in to Naukri.com."""
         logger.info("Navigating to Naukri login page...")
@@ -365,6 +543,15 @@ class NaukriUpdater:
             
             # Take screenshot after login attempt
             self.take_screenshot("after_login")
+
+            # Check if we hit an OTP page
+            if self.detect_otp_page():
+                logger.info("OTP verification detected, handling...")
+                if not self.handle_otp():
+                    logger.error("OTP verification failed")
+                    return False
+                # Re-check URL after OTP
+                time.sleep(3)
 
             # Check if login was successful
             current_url = self.driver.current_url

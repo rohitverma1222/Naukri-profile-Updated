@@ -18,6 +18,14 @@ NAUKRI_PASSWORD = os.environ.get("NAUKRI_PASSWORD", "")
 # Cookie-based authentication (preferred method to bypass OTP)
 NAUKRI_COOKIES_JSON = os.environ.get("NAUKRI_COOKIES", "")
 
+# Email configuration for OTP reading
+EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "")
+EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD", "")
+
+# OTP Settings
+OTP_TIMEOUT = 120  # seconds to wait for OTP
+OTP_POLL_INTERVAL = 5  # seconds between email checks
+
 def get_cookies():
     """Parse cookies from environment variable."""
     if not NAUKRI_COOKIES_JSON:
