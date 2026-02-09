@@ -39,7 +39,7 @@ def get_cookies():
 # File paths
 PROJECT_ROOT = Path(__file__).parent.parent
 RESUME_DIR = PROJECT_ROOT / "resume"
-RESUME_FILE = RESUME_DIR / "resume.pdf"
+RESUME_FILE = RESUME_DIR / "Rohit_Resume_2025.pdf"
 
 # Screenshots directory for debugging
 SCREENSHOTS_DIR = PROJECT_ROOT / "screenshots"

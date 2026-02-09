@@ -2,12 +2,12 @@ name: Update Naukri Profile
 
 on:
   schedule:
-    # Runs at 9 AM IST (3:30 AM UTC)
-    - cron: '30 3 * * *'
-    # Runs at 2 PM IST (8:30 AM UTC)
-    - cron: '30 8 * * *'
-    # Runs at 8 PM IST (2:30 PM UTC)
-    - cron: '30 14 * * *'
+    # Runs every hour from 6 AM to 8 PM IST
+    # IST = UTC + 5:30, so:
+    # 6 AM IST = 0:30 UTC
+    # 8 PM IST = 14:30 UTC
+    # This runs at minute 30 for hours 0-14 UTC (6 AM - 8 PM IST)
+    - cron: '30 0-14 * * *'
   
   # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
@@ -17,6 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      - name: Random delay for variation
+        run: |
+          # Random delay between 0-30 minutes to vary the exact run time
+          DELAY=$((RANDOM % 1800))
+          echo "Waiting for $DELAY seconds ($(($DELAY / 60)) minutes) for randomization..."
+          sleep $DELAY
+          echo "Starting at: $(TZ='Asia/Kolkata' date '+%Y-%m-%d %H:%M:%S IST')"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -50,7 +58,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-screenshots
+          name: debug-screenshots-${{ github.run_id }}
           path: screenshots/
           retention-days: 7
           if-no-files-found: ignore
@@ -59,3 +67,4 @@ jobs:
         if: always()
         run: |
           echo "Workflow completed at: $(TZ='Asia/Kolkata' date '+%Y-%m-%d %H:%M:%S IST')"
+
