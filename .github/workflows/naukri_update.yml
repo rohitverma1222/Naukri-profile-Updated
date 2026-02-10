@@ -2,14 +2,15 @@ name: Update Naukri Profile
 
 on:
   schedule:
-    # Runs every hour from 6 AM to 8 PM IST
-    # IST = UTC + 5:30
-    # 6 AM IST = 00:30 UTC
-    # 8 PM IST = 14:30 UTC
-    - cron: '0 * * * *'  
+    # Runs every 30 minutes
+    - cron: '0,30 * * * *'
 
   # Allow manual trigger
   workflow_dispatch:
+
+concurrency:
+  group: naukri-updater
+  cancel-in-progress: true
 
 jobs:
   update-naukri-profile:

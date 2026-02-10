@@ -8,3 +8,6 @@ webdriver-manager>=4.0.1
 
 # Environment variable management (for local testing)
 python-dotenv>=1.0.0
+
+# Job scheduling for Railway deployment
+schedule>=1.2.0
