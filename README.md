@@ -1,163 +1,125 @@
 # Naukri Profile Automation Tool 🚀
 
-Automatically update your Naukri.com profile resume multiple times per day using GitHub Actions. Keep your profile active and visible to recruiters—even when your laptop is off!
+Automatically keep your Naukri.com profile active and visible to recruiters — runs on Railway (or locally) with zero manual effort.
 
 ## Features
 
-- ✅ **Automatic Resume Updates**: Re-uploads your resume 3 times daily
-- ✅ **Cloud-Based**: Runs on GitHub Actions (100% free)
-- ✅ **Zero Maintenance**: Set it and forget it
+- ✅ **Daily Resume Upload**: Re-uploads your resume once every morning (7 AM IST)
+- ✅ **Hourly Profile Refresh**: Toggles resume headline every hour to bump your profile timestamp
+- ✅ **Cookie-Based Auth**: Uses browser cookies to bypass OTP (no CAPTCHA headaches)
+- ✅ **Auto OTP via Email**: Falls back to email-based OTP reading if cookies expire
+- ✅ **Anti-Detection**: Random delays (1–15 min), realistic user-agent, stealth mode
+- ✅ **Smart Scheduling**: Mon–Sat only, 6 AM – 6 PM IST window
 - ✅ **Error Handling**: Comprehensive logging and debug screenshots
-- ✅ **Secure**: Credentials stored as GitHub Secrets
+- ✅ **Cloud-Ready**: Deploys to Railway with one click
 
 ## Schedule
 
-The automation runs at:
-| Time (IST) | Time (UTC) |
-|------------|------------|
-| 9:00 AM    | 3:30 AM    |
-| 2:00 PM    | 8:30 AM    |
-| 8:00 PM    | 2:30 PM    |
+| Job              | Frequency           | Window                     |
+|------------------|---------------------|----------------------------|
+| Resume Upload    | Once daily at 7 AM  | Mon–Sat, 6 AM – 6 PM IST  |
+| Profile Update   | Every 1 hour        | Mon–Sat, 6 AM – 6 PM IST  |
 
-## Quick Setup Guide
-
-### 1. Create a GitHub Repository
-
-1. Go to [GitHub](https://github.com) and create a new repository
-2. Name it something like `naukri-updater` (can be private)
-
-### 2. Add Your Secrets
-
-1. Go to your repository on GitHub
-2. Navigate to **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret** and add:
-
-| Secret Name | Value |
-|-------------|-------|
-| `NAUKRI_EMAIL` | Your Naukri.com login email |
-| `NAUKRI_PASSWORD` | Your Naukri.com password |
-
-⚠️ **Important**: Make sure there are no extra spaces in your credentials!
-
-### 3. Update Your Resume
-
-Replace the file in `resume/resume.pdf` with your latest resume:
-- Supported formats: PDF, DOC, DOCX, RTF
-- Maximum size: 300 KB
-
-### 4. Push to GitHub
-
-```bash
-cd /home/rohit/Desktop/Project/bbk
-
-# Initialize git (if not already done)
-git init
-
-# Add all files
-git add .
-
-# Commit
-git commit -m "Initial commit: Naukri profile automation"
-
-# Add your remote (replace with your repo URL)
-git remote add origin https://github.com/YOUR_USERNAME/naukri-updater.git
-
-# Push
-git push -u origin main
-```
-
-### 5. Verify It Works
-
-1. Go to your repository on GitHub
-2. Click the **Actions** tab
-3. Select **Update Naukri Profile** workflow
-4. Click **Run workflow** → **Run workflow** (green button)
-5. Watch the job execute and check the logs
+Both jobs include a random **1–15 minute delay** to avoid detection patterns.
 
 ## Project Structure
 
 ```
 bbk/
-├── .github/
-│   └── workflows/
-│       └── naukri_update.yml   # GitHub Actions workflow
+├── scheduler.py                # Entry point — schedules daily & hourly jobs
 ├── naukri_updater/
-│   ├── __init__.py             # Package init
-│   ├── main.py                 # Main automation script
-│   └── config.py               # Configuration settings
+│   ├── __init__.py
+│   ├── main.py                 # NaukriUpdater class (login, resume, headline)
+│   ├── config.py               # URLs, selectors, env-var config
+│   └── email_otp.py            # Email-based OTP reader
 ├── resume/
-│   └── resume.pdf              # Your resume file
+│   └── Rohit_Resume_2025.pdf   # Your resume file
+├── export_cookies.py           # Helper to export browser cookies
 ├── requirements.txt            # Python dependencies
-└── README.md                   # This file
+├── Dockerfile                  # Railway deployment
+├── railway.json                # Railway config
+└── .env.example                # Environment variable template
 ```
 
-## Local Testing
+## Quick Setup
 
-You can test the script locally before pushing:
+### 1. Install Dependencies
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Set environment variables
-export NAUKRI_EMAIL="your-email@example.com"
-export NAUKRI_PASSWORD="your-password"
+### 2. Configure Environment Variables
 
-# Run the script
-python -m naukri_updater.main
+Copy `.env.example` and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+| Variable             | Required | Description                              |
+|----------------------|----------|------------------------------------------|
+| `NAUKRI_COOKIES`     | ✅       | JSON array of browser cookies (preferred)|
+| `NAUKRI_EMAIL`       | Fallback | Naukri login email                       |
+| `NAUKRI_PASSWORD`    | Fallback | Naukri login password                    |
+| `EMAIL_ADDRESS`      | Optional | Gmail for OTP reading                    |
+| `EMAIL_APP_PASSWORD` | Optional | Gmail app password for OTP               |
+
+### 3. Export Cookies (Recommended)
+
+```bash
+python export_cookies.py
+```
+
+This exports your Naukri session cookies to bypass login/OTP entirely.
+
+### 4. Run Locally
+
+```bash
+python scheduler.py
+```
+
+### 5. Deploy to Railway
+
+Push to GitHub and connect your repo to [Railway](https://railway.app). Set the environment variables in Railway dashboard.
+
+## How It Works
+
+1. **Scheduler** (`scheduler.py`) runs two independent jobs:
+   - **Daily 7 AM**: Uploads resume → triggers "profile updated" on Naukri
+   - **Every hour**: Toggles a period (`.`) at the end of your resume headline → bumps profile timestamp
+
+2. **Authentication** tries cookie-based login first, then falls back to email/password + OTP.
+
+3. Both jobs skip Sundays and hours outside 6 AM – 6 PM IST.
+
+## Customization
+
+Edit `scheduler.py` to change:
+
+```python
+RESUME_UPLOAD_TIME = "07:00"  # Change daily upload time
+START_HOUR = 6                # Window start
+END_HOUR = 18                 # Window end
+ALLOWED_DAYS = {0, 1, 2, 3, 4, 5}  # 0=Mon, 6=Sun
 ```
 
 ## Troubleshooting
 
-### Login Failed
-- Verify your email and password are correct
-- Check if Naukri has added CAPTCHA (may need manual intervention)
-- Look at the screenshots in the GitHub Actions artifacts
-
-### Resume Upload Failed
-- Ensure your resume is under 300 KB
-- Ensure it's in a supported format (PDF, DOC, DOCX, RTF)
-- Check the debug screenshots
-
-### Workflow Not Running
-- Go to Actions tab and ensure workflows are enabled
-- Check if your repository is public or if you have Actions enabled for private repos
-
-### Viewing Debug Screenshots
-1. Go to GitHub Actions
-2. Click on a failed workflow run
-3. Scroll down to "Artifacts"
-4. Download `debug-screenshots`
-
-## Customization
-
-### Change Schedule
-Edit `.github/workflows/naukri_update.yml` and modify the cron expressions:
-
-```yaml
-schedule:
-  - cron: '30 3 * * *'   # 9:00 AM IST
-  - cron: '30 8 * * *'   # 2:00 PM IST
-  - cron: '30 14 * * *'  # 8:00 PM IST
-```
-
-Use [crontab.guru](https://crontab.guru/) to generate cron expressions.
-
-### Enable Headline Toggle
-To also update your resume headline (adds/removes a period for visibility boost), edit `naukri_updater/main.py` and uncomment line ~280:
-
-```python
-# Optionally update headline (uncomment if desired)
-self.update_headline()  # ← Uncomment this line
-```
+| Issue | Fix |
+|-------|-----|
+| Login fails | Re-export cookies with `export_cookies.py` |
+| OTP needed | Set `EMAIL_ADDRESS` and `EMAIL_APP_PASSWORD` |
+| Resume upload fails | Ensure resume < 300 KB, format: PDF/DOC/DOCX |
+| Headline update fails | Check debug screenshots in `screenshots/` |
 
 ## ⚠️ Disclaimer
 
-This tool is for educational purposes. Automated profile updates may violate Naukri.com's Terms of Service. Use at your own risk and discretion.
+This tool is for educational purposes. Automated profile updates may violate Naukri.com's Terms of Service. Use at your own risk.
 
 ## License
 
-MIT License - Feel free to modify and use as needed.
+MIT License
 
 ---
 

@@ -53,27 +53,29 @@ SCRIPT_TIMEOUT = 60  # seconds
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
 
-# CSS Selectors for Naukri.com (updated to match current site)
+# CSS Selectors for Naukri.com (verified against live site – Feb 2026)
 SELECTORS = {
     # Login page selectors
     "email_input": "input[placeholder='Enter Email ID / Username']",
     "password_input": "input[placeholder='Enter Password']",
     "login_button": "button[type='submit']",
-    
+
     # Alternative selectors (fallbacks)
     "email_input_alt": "#usernameField",
     "password_input_alt": "#passwordField",
-    
+
     # Profile page selectors
     "profile_photo": ".nI-gNb-drawer__icon",
     "view_profile": "a[href*='/mnjuser/profile']",
     "resume_section": ".widgetHead.resumeWidget",
     "upload_resume_input": "input[type='file']",
     "update_resume_btn": "input[type='file'][accept*='.doc']",
-    "resume_headline": ".row.resumeHeadline .txt-bold",
-    "edit_headline_btn": ".resumeHeadline .pencilIcon",
-    "headline_textarea": "textarea[name='resumeHeadline']",
-    "save_headline_btn": "button.btn-dark-ot",
+
+    # Resume headline selectors (verified from live DOM)
+    "resume_headline": "#lazyResumeHead",
+    "edit_headline_btn": "#lazyResumeHead .edit.icon",
+    "headline_textarea": "#resumeHeadlineTxt",
+    "save_headline_btn": ".resumeHeadlineEdit button.btn-dark-ot",
 }
 
 # Validate required configuration

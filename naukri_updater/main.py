@@ -719,50 +719,112 @@ class NaukriUpdater:
             return False
 
     def update_headline(self) -> bool:
-        """Update resume headline by toggling a period (optional visibility boost)."""
+        """Update resume headline by toggling a period (visibility boost).
+
+        This triggers a profile-modified timestamp update on Naukri,
+        keeping the profile fresh for recruiters.
+        """
         logger.info("Attempting to update resume headline...")
 
         try:
-            # Find the headline edit button
-            edit_btn = self.wait.until(
-                EC.element_to_be_clickable(
-                    (By.CSS_SELECTOR, config.SELECTORS["edit_headline_btn"])
-                )
-            )
+            # ── 1. Click the edit (pencil) icon ──
+            edit_selectors = [
+                config.SELECTORS["edit_headline_btn"],  # #lazyResumeHead .edit.icon
+                "#lazyResumeHead .edit",
+                ".resumeHeadline .edit.icon",
+                ".resumeHeadline .pencilIcon",
+                "//span[contains(@class,'edit') and ancestor::*[contains(@class,'resumeHeadline')]]",
+            ]
+            edit_btn = self.find_element_with_fallback(edit_selectors, "headline edit button")
+            if not edit_btn:
+                # Last resort – wait for it
+                try:
+                    edit_btn = self.wait.until(
+                        EC.element_to_be_clickable(
+                            (By.CSS_SELECTOR, "#lazyResumeHead .edit.icon, .resumeHeadline .edit")
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if not edit_btn:
+                logger.warning("Could not find headline edit button")
+                self.take_screenshot("no_headline_edit_btn")
+                return False
+
             edit_btn.click()
             time.sleep(2)
+            self.take_screenshot("headline_edit_opened")
 
-            # Find the headline textarea
-            headline_textarea = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, config.SELECTORS["headline_textarea"])
-                )
-            )
+            # ── 2. Find the headline textarea ──
+            textarea_selectors = [
+                config.SELECTORS["headline_textarea"],  # #resumeHeadlineTxt
+                "textarea[name='resumeHeadline']",
+                ".resumeHeadlineEdit textarea",
+                "textarea.fue__text-area",
+            ]
+            headline_textarea = self.find_element_with_fallback(textarea_selectors, "headline textarea")
+            if not headline_textarea:
+                try:
+                    headline_textarea = self.wait.until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, "#resumeHeadlineTxt, textarea[name='resumeHeadline']")
+                        )
+                    )
+                except Exception:
+                    pass
 
-            # Get current headline and toggle period
-            current_headline = headline_textarea.get_attribute("value")
-            
+            if not headline_textarea:
+                logger.warning("Could not find headline textarea")
+                self.take_screenshot("no_headline_textarea")
+                return False
+
+            # ── 3. Toggle a period at the end ──
+            current_headline = headline_textarea.get_attribute("value") or ""
+
             if current_headline.endswith("."):
                 new_headline = current_headline[:-1]
             else:
                 new_headline = current_headline + "."
 
-            # Update headline
             headline_textarea.clear()
             headline_textarea.send_keys(new_headline)
+            time.sleep(1)
 
-            # Save changes
-            save_btn = self.driver.find_element(
-                By.CSS_SELECTOR, config.SELECTORS["save_headline_btn"]
-            )
+            # ── 4. Click Save ──
+            save_selectors = [
+                config.SELECTORS["save_headline_btn"],  # .resumeHeadlineEdit button.btn-dark-ot
+                ".resumeHeadlineEdit button[type='submit']",
+                "button.btn-dark-ot",
+                ".resumeHeadlineEdit button",
+                "//button[contains(text(),'Save')]",
+            ]
+            save_btn = self.find_element_with_fallback(save_selectors, "headline save button")
+            if not save_btn:
+                try:
+                    save_btn = self.wait.until(
+                        EC.element_to_be_clickable(
+                            (By.CSS_SELECTOR, ".resumeHeadlineEdit button.btn-dark-ot, button.btn-dark-ot")
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if not save_btn:
+                logger.warning("Could not find headline save button")
+                self.take_screenshot("no_headline_save_btn")
+                return False
+
             save_btn.click()
             time.sleep(2)
+            self.take_screenshot("headline_saved")
 
             logger.info(f"Headline updated: '{current_headline}' -> '{new_headline}'")
             return True
 
         except Exception as e:
             logger.warning(f"Could not update headline (non-critical): {e}")
+            self.take_screenshot("headline_update_error")
             return False
 
     def cleanup(self):
@@ -774,10 +836,17 @@ class NaukriUpdater:
             except Exception as e:
                 logger.warning(f"Error closing browser: {e}")
 
-    def run(self) -> bool:
-        """Run the complete update process."""
+    def run(self, mode: str = "all") -> bool:
+        """Run the update process.
+
+        Args:
+            mode: One of 'all', 'resume', or 'profile'.
+                  - 'resume' : only uploads the resume file.
+                  - 'profile': only toggles the headline.
+                  - 'all'    : does both (default).
+        """
         logger.info("=" * 50)
-        logger.info("Starting Naukri Profile Update")
+        logger.info(f"Starting Naukri Profile Update  [mode={mode}]")
         logger.info(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=" * 50)
 
@@ -803,7 +872,7 @@ class NaukriUpdater:
                     logger.info("Successfully authenticated using cookies!")
                 else:
                     logger.warning("Cookie authentication failed, will try password login...")
-            
+
             # Fall back to password login if cookies didn't work
             if not logged_in:
                 if config.NAUKRI_EMAIL and config.NAUKRI_PASSWORD:
@@ -821,15 +890,21 @@ class NaukriUpdater:
                 logger.error("Failed to navigate to profile, aborting...")
                 return False
 
-            # Update resume
-            if self.update_resume():
-                success = True
-                logger.info("Resume update completed successfully!")
-            else:
-                logger.error("Resume update failed")
+            # ---- Resume update (daily) ----
+            if mode in ("all", "resume"):
+                if self.update_resume():
+                    success = True
+                    logger.info("Resume update completed successfully!")
+                else:
+                    logger.error("Resume update failed")
 
-            # Optionally update headline (uncomment if desired)
-            # self.update_headline()
+            # ---- Profile / headline update (hourly) ----
+            if mode in ("all", "profile"):
+                if self.update_headline():
+                    success = True
+                    logger.info("Profile headline update completed successfully!")
+                else:
+                    logger.warning("Profile headline update failed (non-critical)")
 
         except WebDriverException as e:
             logger.error(f"WebDriver error: {e}")
@@ -841,7 +916,7 @@ class NaukriUpdater:
             self.cleanup()
 
         logger.info("=" * 50)
-        logger.info(f"Update completed. Success: {success}")
+        logger.info(f"Update completed. Mode: {mode} | Success: {success}")
         logger.info("=" * 50)
 
         return success
