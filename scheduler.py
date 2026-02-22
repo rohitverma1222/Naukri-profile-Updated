@@ -12,9 +12,9 @@ from flask import Flask, jsonify
 IST = pytz.timezone("Asia/Kolkata")
 
 # Allowed days: Monday(0) to Saturday(5)
-ALLOWED_DAYS = {0, 1, 2, 3, 4, 5}
+ALLOWED_DAYS = {0, 1, 2, 3, 4, 5, 6}
 START_HOUR = 6   # 6 AM IST
-END_HOUR = 18    # 6 PM IST
+END_HOUR = 22    # 10 PM IST
 
 # Morning hour for the daily resume upload
 RESUME_UPLOAD_TIME = "07:00"  # 7 AM IST
