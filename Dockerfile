@@ -28,8 +28,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Create screenshots directory
-RUN mkdir -p screenshots
+# Expose the port for Render
+EXPOSE 10000
 
-# Run the scheduler
+# Run the scheduler & web server
 CMD ["python", "scheduler.py"]

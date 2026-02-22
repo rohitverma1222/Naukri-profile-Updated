@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: naukri-profile-updater
+    runtime: docker
+    plan: free
+    region: singapore # Choose the region closest to you
+    envVars:
+      - key: PORT
+        value: 10000
+      - fromGroup: naukri-secrets # You should create this group in Render dashboard or add vars here
+      # Or specify them individually:
+      # - key: NAUKRI_EMAIL
+      #   sync: false
+      # - key: NAUKRI_PASSWORD
+      #   sync: false

@@ -14,3 +14,7 @@ schedule>=1.2.0
 
 # Timezone support
 pytz>=2023.3
+
+# Web server for Render health checks (Free tier keep-alive)
+flask>=3.0.0
+gunicorn>=21.2.0
