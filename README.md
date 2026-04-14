@@ -64,6 +64,7 @@ cp .env.example .env
 | `NAUKRI_PASSWORD`    | Fallback | Naukri login password                    |
 | `EMAIL_ADDRESS`      | Optional | Gmail for OTP reading                    |
 | `EMAIL_APP_PASSWORD` | Optional | Gmail app password for OTP               |
+| `ENABLE_SCREENSHOTS` | Optional | Set to `true` to enable debug screenshots|
 
 ### 3. Export Cookies (Recommended)
 

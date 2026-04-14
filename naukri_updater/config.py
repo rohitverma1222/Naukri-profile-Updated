@@ -39,10 +39,10 @@ RESUME_FILE = RESUME_DIR / "Rohit_Resume_2026.pdf"
 
 # Screenshots settings
 SCREENSHOTS_DIR = PROJECT_ROOT / "screenshots"
-# Only enable screenshots if NOT in production/Render, or if explicitly enabled
-SCREENSHOTS_ENABLED = os.environ.get("ENABLE_SCREENSHOTS", "true").lower() == "true"
+# Only enable screenshots if explicitly enabled via environment variable
+SCREENSHOTS_ENABLED = os.environ.get("ENABLE_SCREENSHOTS", "false").lower() == "true"
 if os.environ.get("ENV") == "production" or os.environ.get("RENDER") == "true":
-    # Default to False in production unless explicitly overridden
+    # Always False in production unless explicitly overridden
     if "ENABLE_SCREENSHOTS" not in os.environ:
         SCREENSHOTS_ENABLED = False
 
