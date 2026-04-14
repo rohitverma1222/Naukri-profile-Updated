@@ -79,7 +79,13 @@ This exports your Naukri session cookies to bypass login/OTP entirely.
 python scheduler.py
 ```
 
-### 5. Deploy to Railway
+### 5. Manual Triggering (API)
+
+When the scheduler is running, you can manually trigger updates via these endpoints:
+- **Resume Update**: `GET http://localhost:10000/update-resume`
+- **Profile Update**: `GET http://localhost:10000/update-profile`
+
+### 6. Deploy to Render
 
 Push to GitHub and connect your repo to [Railway](https://railway.app). Set the environment variables in Railway dashboard.
 

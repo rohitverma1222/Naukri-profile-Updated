@@ -5,6 +5,10 @@ Configuration settings for Naukri Profile Automation Tool
 import os
 import json
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Naukri.com URLs
 NAUKRI_LOGIN_URL = "https://www.naukri.com/nlogin/login"
@@ -17,14 +21,6 @@ NAUKRI_PASSWORD = os.environ.get("NAUKRI_PASSWORD", "")
 
 # Cookie-based authentication (preferred method to bypass OTP)
 NAUKRI_COOKIES_JSON = os.environ.get("NAUKRI_COOKIES", "")
-
-# Email configuration for OTP reading
-EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "")
-EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD", "")
-
-# OTP Settings
-OTP_TIMEOUT = 120  # seconds to wait for OTP
-OTP_POLL_INTERVAL = 5  # seconds between email checks
 
 def get_cookies():
     """Parse cookies from environment variable."""
@@ -41,8 +37,14 @@ PROJECT_ROOT = Path(__file__).parent.parent
 RESUME_DIR = PROJECT_ROOT / "resume"
 RESUME_FILE = RESUME_DIR / "Rohit_Resume_2026.pdf"
 
-# Screenshots directory for debugging
+# Screenshots settings
 SCREENSHOTS_DIR = PROJECT_ROOT / "screenshots"
+# Only enable screenshots if NOT in production/Render, or if explicitly enabled
+SCREENSHOTS_ENABLED = os.environ.get("ENABLE_SCREENSHOTS", "true").lower() == "true"
+if os.environ.get("ENV") == "production" or os.environ.get("RENDER") == "true":
+    # Default to False in production unless explicitly overridden
+    if "ENABLE_SCREENSHOTS" not in os.environ:
+        SCREENSHOTS_ENABLED = False
 
 # Selenium settings
 IMPLICIT_WAIT = 15  # seconds

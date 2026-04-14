@@ -36,6 +36,40 @@ def health_check():
     return jsonify({"status": "ok", "time_ist": datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}), 200
 
 
+def run_manual_update(mode: str):
+    """Helper to run the updater immediately in a separate thread."""
+    try:
+        logger.info(f"[MANUAL] Starting {mode} update via API...")
+        from naukri_updater.main import NaukriUpdater
+        updater = NaukriUpdater()
+        updater.run(mode=mode)
+        logger.info(f"[MANUAL] {mode} update triggered via API completed.")
+    except Exception as e:
+        logger.error(f"[MANUAL] {mode} update failed: {e}")
+
+
+@app.route("/update-resume")
+def update_resume_manual():
+    """Endpoint to manually trigger resume update."""
+    threading.Thread(target=run_manual_update, args=("resume",), daemon=True).start()
+    return jsonify({
+        "status": "triggered",
+        "mode": "resume",
+        "message": "Resume update started in background"
+    }), 202
+
+
+@app.route("/update-profile")
+def update_profile_manual():
+    """Endpoint to manually trigger profile update."""
+    threading.Thread(target=run_manual_update, args=("profile",), daemon=True).start()
+    return jsonify({
+        "status": "triggered",
+        "mode": "profile",
+        "message": "Profile update started in background"
+    }), 202
+
+
 def is_within_allowed_window():
     """Check if current IST time is within the allowed day/time window."""
     now_ist = datetime.now(IST)
