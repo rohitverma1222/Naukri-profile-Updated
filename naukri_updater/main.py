@@ -15,6 +15,7 @@ Environment Variables:
 import logging
 import sys
 import time
+import argparse
 from datetime import datetime
 from pathlib import Path
 
@@ -77,10 +78,10 @@ class NaukriUpdater:
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-running-insecure-content")
         
-        # Realistic user agent
+        # Realistic modern user agent (Chrome 133 as of Feb 2026)
         chrome_options.add_argument(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         )
         
         # Language and accept headers
@@ -197,8 +198,8 @@ class NaukriUpdater:
             
             self.take_screenshot("after_adding_cookies")
             
-            # Navigate directly to profile (skip refresh to avoid timeout)
-            logger.info("Navigating directly to profile page...")
+            # Navigate directly to profile
+            logger.info("Navigating to profile page to verify session...")
             try:
                 self.driver.get(config.NAUKRI_PROFILE_URL)
                 time.sleep(5)
@@ -208,6 +209,13 @@ class NaukriUpdater:
                 self.driver.get("https://www.naukri.com/mnjuser/homepage")
                 time.sleep(5)
             
+            # Check for Access Denied immediately after navigation
+            if "Access Denied" in self.driver.title or "Access Denied" in self.driver.page_source:
+                logger.warning("Access Denied detected on first profile load. Trying to wait and refresh...")
+                time.sleep(5)
+                self.driver.refresh()
+                time.sleep(5)
+
             self.take_screenshot("after_profile_navigation")
             
             # Check if we're logged in by looking at the page content
@@ -427,16 +435,31 @@ class NaukriUpdater:
             return False
 
     def navigate_to_profile(self) -> bool:
-        """Navigate to the profile page."""
-        logger.info("Navigating to profile page...")
+        """Navigate to the profile page with smart redundancy check."""
+        current_url = self.driver.current_url
+        if config.NAUKRI_PROFILE_URL in current_url:
+            logger.info("Already on profile page, checking for stability...")
+            
+            # Check for 'Access Denied' even if URL is correct
+            if "Access Denied" in self.driver.title:
+                logger.warning("Page shows Access Denied! Attempting to re-load...")
+                self.driver.get(config.NAUKRI_PROFILE_URL)
+                time.sleep(5)
+            else:
+                return True
 
+        logger.info("Navigating to profile page...")
         try:
             self.driver.get(config.NAUKRI_PROFILE_URL)
-            time.sleep(3)
+            time.sleep(5)
 
-            logger.info(f"Current URL: {self.driver.current_url}")
+            current_url = self.driver.current_url
+            logger.info(f"Current URL: {current_url}")
 
-            if "profile" in self.driver.current_url.lower():
+            if "profile" in current_url.lower():
+                if "Access Denied" in self.driver.title:
+                    logger.error("Access Denied on profile page load")
+                    return False
                 logger.info("Successfully navigated to profile page")
                 return True
             else:
@@ -761,8 +784,17 @@ class NaukriUpdater:
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Naukri Profile Automation Tool")
+    parser.add_argument(
+        "--mode", 
+        choices=["all", "resume", "profile"], 
+        default="all",
+        help="Update mode: 'resume', 'profile', or 'all' (default)"
+    )
+    args = parser.parse_args()
+
     updater = NaukriUpdater()
-    success = updater.run()
+    success = updater.run(mode=args.mode)
     sys.exit(0 if success else 1)
 
 
