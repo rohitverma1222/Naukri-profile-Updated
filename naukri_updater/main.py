@@ -16,6 +16,7 @@ import logging
 import sys
 import time
 import argparse
+import random
 from datetime import datetime
 from pathlib import Path
 
@@ -196,27 +197,29 @@ class NaukriUpdater:
             except Exception as js_err:
                 logger.debug(f"JS cookie setting failed: {js_err}")
             
-            self.take_screenshot("after_adding_cookies")
-            
-            # Navigate directly to profile
-            logger.info("Navigating to profile page to verify session...")
+            # Navigate to the dashboard (less guarded than direct profile access)
+            logger.info("Navigating to user dashboard to verify session...")
             try:
-                self.driver.get(config.NAUKRI_PROFILE_URL)
-                time.sleep(5)
+                self.driver.get("https://www.naukri.com/mnjuser/homepage")
+                time.sleep(random.uniform(5.0, 8.0))
             except Exception as e:
-                logger.warning(f"Profile navigation error: {e}")
-                # Try homepage instead
+                logger.warning(f"Dashboard navigation error: {e}")
+                # Try generic user area instead
                 self.driver.get("https://www.naukri.com/mnjuser/homepage")
                 time.sleep(5)
             
-            # Check for Access Denied immediately after navigation
-            if "Access Denied" in self.driver.title or "Access Denied" in self.driver.page_source:
-                logger.warning("Access Denied detected on first profile load. Trying to wait and refresh...")
-                time.sleep(5)
+            # Check for Access Denied immediately
+            page_title = self.driver.title
+            if "Access Denied" in page_title or "Access Denied" in self.driver.page_source:
+                logger.warning(f"Access Denied detected on dashboard load. Title: {page_title}")
+                logger.info(f"Page content snippet: {self.driver.page_source[:300].replace('\n', ' ')}")
+                
+                logger.info("Attempting a human-like wait and refresh...")
+                time.sleep(random.uniform(10.0, 15.0))
                 self.driver.refresh()
                 time.sleep(5)
 
-            self.take_screenshot("after_profile_navigation")
+            self.take_screenshot("after_dashboard_navigation")
             
             # Check if we're logged in by looking at the page content
             current_url = self.driver.current_url
@@ -442,7 +445,9 @@ class NaukriUpdater:
             
             # Check for 'Access Denied' even if URL is correct
             if "Access Denied" in self.driver.title:
-                logger.warning("Page shows Access Denied! Attempting to re-load...")
+                logger.warning("Page shows Access Denied! Attempting to re-load via Home...")
+                self.driver.get(config.NAUKRI_HOME_URL)
+                time.sleep(random.uniform(3.0, 5.0))
                 self.driver.get(config.NAUKRI_PROFILE_URL)
                 time.sleep(5)
             else:
@@ -450,8 +455,13 @@ class NaukriUpdater:
 
         logger.info("Navigating to profile page...")
         try:
+            # Mimic human scroll before navigation if on homepage
+            if "homepage" in self.driver.current_url:
+                self.driver.execute_script("window.scrollTo(0, 300);")
+                time.sleep(2)
+
             self.driver.get(config.NAUKRI_PROFILE_URL)
-            time.sleep(5)
+            time.sleep(random.uniform(5.0, 8.0))
 
             current_url = self.driver.current_url
             logger.info(f"Current URL: {current_url}")
@@ -459,6 +469,7 @@ class NaukriUpdater:
             if "profile" in current_url.lower():
                 if "Access Denied" in self.driver.title:
                     logger.error("Access Denied on profile page load")
+                    logger.info(f"Page content snippet: {self.driver.page_source[:300].replace('\n', ' ')}")
                     return False
                 logger.info("Successfully navigated to profile page")
                 return True
