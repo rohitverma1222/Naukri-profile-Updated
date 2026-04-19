@@ -99,8 +99,7 @@ class NaukriAPIClient:
         # because the request goes to api.scrape.do, not naukri.com directly
         if self.scrape_do_token and self.session:
             cookie_str = "; ".join(
-                f"{c.name}={c.value}" for c in self.session.cookies
-                if c.domain and "naukri" in c.domain
+                f"{name}={value}" for name, value in self.session.cookies.items()
             )
             if cookie_str:
                 if "headers" not in kwargs:
