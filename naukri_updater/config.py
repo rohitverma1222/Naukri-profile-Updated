@@ -51,6 +51,15 @@ IMPLICIT_WAIT = 15  # seconds
 PAGE_LOAD_TIMEOUT = 60  # seconds
 SCRIPT_TIMEOUT = 60  # seconds
 
+# Scrape.do Proxy (residential proxy to bypass Akamai IP blocks)
+SCRAPE_DO_TOKEN = "8835e4af8d5b4a048f8d3744beaebd7279ef9fd1854"
+
+def get_proxy_url():
+    """Build the Scrape.do proxy URL if token is available."""
+    if SCRAPE_DO_TOKEN:
+        return f"http://{SCRAPE_DO_TOKEN}:render=false@proxy.scrape.do:8080"
+    return None
+
 # Retry settings
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds

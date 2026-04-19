@@ -94,6 +94,14 @@ class NaukriUpdater:
         chrome_options.add_argument("--lang=en-US,en")
         chrome_options.add_argument("--accept-lang=en-US,en;q=0.9")
 
+        # Proxy configuration (Scrape.do residential proxy to bypass Akamai)
+        proxy_url = config.get_proxy_url()
+        if proxy_url:
+            chrome_options.add_argument(f"--proxy-server={proxy_url}")
+            logger.info("Scrape.do residential proxy enabled")
+        else:
+            logger.info("No proxy configured (running direct)")
+
         # Selenium 4.6+ automatically manages ChromeDriver via built-in Selenium Manager
         self.driver = webdriver.Chrome(options=chrome_options)
         

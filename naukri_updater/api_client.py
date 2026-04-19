@@ -42,6 +42,17 @@ class NaukriAPIClient:
 
         self.session = Session(impersonate="chrome124")
 
+        # Configure proxy if available
+        proxy_url = config.get_proxy_url()
+        if proxy_url:
+            self.session.proxies = {
+                "http": proxy_url,
+                "https": proxy_url,
+            }
+            logger.info("[API] Scrape.do residential proxy enabled")
+        else:
+            logger.info("[API] No proxy configured (running direct)")
+
         # Set common headers to mimic a real browser
         self.session.headers.update({
             "Accept": "application/json, text/plain, */*",
