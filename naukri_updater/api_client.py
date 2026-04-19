@@ -40,16 +40,21 @@ class NaukriAPIClient:
 
         logger.info("[API] Setting up TLS-impersonated HTTP session...")
 
-        self.session = Session(impersonate="chrome124")
-
         # Configure proxy if available
         proxy_url = config.get_proxy_url()
+
+        # Scrape.do intercepts HTTPS (MITM proxy), so we must disable SSL verification
+        self.session = Session(
+            impersonate="chrome124",
+            verify=not bool(proxy_url),  # Disable SSL verify when using proxy
+        )
+
         if proxy_url:
             self.session.proxies = {
                 "http": proxy_url,
                 "https": proxy_url,
             }
-            logger.info("[API] Scrape.do residential proxy enabled")
+            logger.info("[API] Scrape.do residential proxy enabled (SSL verify disabled)")
         else:
             logger.info("[API] No proxy configured (running direct)")
 
