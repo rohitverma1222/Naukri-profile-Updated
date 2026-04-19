@@ -212,7 +212,8 @@ class NaukriUpdater:
             page_title = self.driver.title
             if "Access Denied" in page_title or "Access Denied" in self.driver.page_source:
                 logger.warning(f"Access Denied detected on dashboard load. Title: {page_title}")
-                logger.info(f"Page content snippet: {self.driver.page_source[:300].replace('\n', ' ')}")
+                snippet = self.driver.page_source[:300].replace('\n', ' ')
+                logger.info(f"Page content snippet: {snippet}")
                 
                 logger.info("Attempting a human-like wait and refresh...")
                 time.sleep(random.uniform(10.0, 15.0))
@@ -469,7 +470,8 @@ class NaukriUpdater:
             if "profile" in current_url.lower():
                 if "Access Denied" in self.driver.title:
                     logger.error("Access Denied on profile page load")
-                    logger.info(f"Page content snippet: {self.driver.page_source[:300].replace('\n', ' ')}")
+                    snippet = self.driver.page_source[:300].replace('\n', ' ')
+                    logger.info(f"Page content snippet: {snippet}")
                     return False
                 logger.info("Successfully navigated to profile page")
                 return True
