@@ -785,6 +785,7 @@ class NaukriUpdater:
 
         success = False
         logged_in = False
+        selenium_failed = False
 
         try:
             # Setup browser
@@ -795,8 +796,8 @@ class NaukriUpdater:
                 logger.info("Cookie authentication is available, trying it...")
                 logged_in = self.load_cookies()
                 if not logged_in:
-                    logger.error("Cookie authentication failed!")
-                    return False
+                    logger.warning("Cookie authentication via Selenium failed!")
+                    selenium_failed = True
             elif config.NAUKRI_EMAIL and config.NAUKRI_PASSWORD:
                 logger.info("Attempting password-based login...")
                 if not self.login():
@@ -807,35 +808,55 @@ class NaukriUpdater:
                 logger.error("No valid authentication method available! Provide cookies or credentials.")
                 return False
 
-            # Ensure we're on the profile page
-            if not self.navigate_to_profile():
-                logger.error("Failed to navigate to profile, aborting...")
-                return False
-
-            # ---- Resume update (daily) ----
-            if mode in ("all", "resume"):
-                if self.update_resume():
-                    success = True
-                    logger.info("Resume update completed successfully!")
+            if logged_in:
+                # Ensure we're on the profile page
+                if not self.navigate_to_profile():
+                    logger.warning("Failed to navigate to profile via Selenium")
+                    selenium_failed = True
                 else:
-                    logger.error("Resume update failed")
+                    # ---- Resume update (daily) ----
+                    if mode in ("all", "resume"):
+                        if self.update_resume():
+                            success = True
+                            logger.info("Resume update completed successfully!")
+                        else:
+                            logger.error("Resume update failed")
 
-            # ---- Profile / headline update (hourly) ----
-            if mode in ("all", "profile"):
-                if self.update_headline():
-                    success = True
-                    logger.info("Profile headline update completed successfully!")
-                else:
-                    logger.warning("Profile headline update failed (non-critical)")
+                    # ---- Profile / headline update (hourly) ----
+                    if mode in ("all", "profile"):
+                        if self.update_headline():
+                            success = True
+                            logger.info("Profile headline update completed successfully!")
+                        else:
+                            logger.warning("Profile headline update failed (non-critical)")
 
         except WebDriverException as e:
             logger.error(f"WebDriver error: {e}")
             self.take_screenshot("webdriver_error")
+            selenium_failed = True
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
             self.take_screenshot("unexpected_error")
+            selenium_failed = True
         finally:
             self.cleanup()
+
+        # ── API Fallback ──
+        # If Selenium failed (e.g. Access Denied from Akamai on datacenter IPs),
+        # try direct HTTP API calls with TLS impersonation.
+        if selenium_failed and not success:
+            logger.info("=" * 50)
+            logger.info("Selenium approach failed — trying API fallback with curl_cffi...")
+            logger.info("=" * 50)
+            try:
+                from .api_client import NaukriAPIClient
+                api_client = NaukriAPIClient()
+                success = api_client.run(mode=mode)
+            except ImportError:
+                logger.error("curl_cffi is not installed. Cannot use API fallback.")
+                logger.error("Install it with: pip install curl_cffi")
+            except Exception as e:
+                logger.error(f"API fallback also failed: {e}")
 
         logger.info("=" * 50)
         logger.info(f"Update completed. Mode: {mode} | Success: {success}")
