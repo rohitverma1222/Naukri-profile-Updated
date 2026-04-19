@@ -3,6 +3,9 @@ Naukri API Client — Direct HTTP-based profile update fallback.
 
 Uses curl_cffi to impersonate a real browser's TLS fingerprint,
 bypassing Akamai WAF on datacenter IPs where Selenium gets blocked.
+
+When SCRAPE_DO_TOKEN is set, all requests are routed through Scrape.do's
+API mode (URL wrapper) to use residential IPs.
 """
 
 import json
@@ -10,17 +13,15 @@ import logging
 import re
 import time
 import random
+import urllib.parse
 from pathlib import Path
 
 from . import config
 
 logger = logging.getLogger(__name__)
 
-# Naukri internal API base URLs (reverse-engineered from XHR traffic)
+# Naukri internal API base URLs
 PROFILE_PAGE_URL = "https://www.naukri.com/mnjuser/profile"
-PROFILE_API_URL = "https://www.naukri.com/cloudgateway-mynaukri/resman-aggregator-services/v0/users/{user_id}/profiles"
-HEADLINE_API_URL = "https://www.naukri.com/cloudgateway-mynaukri/resman-aggregator-services/v0/users/{user_id}/profiles/headline"
-RESUME_UPLOAD_URL = "https://www.naukri.com/cloudgateway-mynaukri/resman-aggregator-services/v0/users/{user_id}/profiles/resumeUpload"
 
 
 class NaukriAPIClient:
@@ -29,6 +30,14 @@ class NaukriAPIClient:
     def __init__(self):
         self.session = None
         self.user_id = None
+        self.scrape_do_token = config.SCRAPE_DO_TOKEN
+
+    def _wrap_url(self, url: str) -> str:
+        """Wrap URL through Scrape.do API if token is configured."""
+        if self.scrape_do_token:
+            encoded = urllib.parse.quote(url, safe="")
+            return f"http://api.scrape.do/?token={self.scrape_do_token}&url={encoded}&super=true"
+        return url
 
     def setup_session(self) -> bool:
         """Create a curl_cffi session with browser impersonation and load cookies."""
@@ -40,38 +49,22 @@ class NaukriAPIClient:
 
         logger.info("[API] Setting up TLS-impersonated HTTP session...")
 
-        # Configure proxy if available
-        proxy_url = config.get_proxy_url()
-
-        # Scrape.do intercepts HTTPS (MITM proxy), so we must disable SSL verification
         self.session = Session(
             impersonate="chrome124",
-            verify=not bool(proxy_url),  # Disable SSL verify when using proxy
+            verify=False,  # Scrape.do may redirect through different certs
         )
 
-        if proxy_url:
-            self.session.proxies = {
-                "http": proxy_url,
-                "https": proxy_url,
-            }
-            logger.info("[API] Scrape.do residential proxy enabled (SSL verify disabled)")
+        if self.scrape_do_token:
+            logger.info("[API] Scrape.do API mode enabled (super=true for residential IPs)")
         else:
             logger.info("[API] No proxy configured (running direct)")
 
         # Set common headers to mimic a real browser
         self.session.headers.update({
-            "Accept": "application/json, text/plain, */*",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
-            "Referer": "https://www.naukri.com/mnjuser/profile",
-            "Origin": "https://www.naukri.com",
-            "sec-ch-ua": '"Google Chrome";v="147", "Chromium";v="147", "Not(A:Brand";v="24"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
@@ -96,9 +89,34 @@ class NaukriAPIClient:
         logger.info(f"[API] Loaded {cookies_loaded} cookies into session")
         return True
 
+    def _make_request(self, method: str, url: str, **kwargs):
+        """Make an HTTP request, routing through Scrape.do if configured."""
+        wrapped_url = self._wrap_url(url)
+        if wrapped_url != url:
+            logger.info(f"[API] Routing through Scrape.do: {method.upper()} {url}")
+
+        # When using Scrape.do API mode, cookies must be sent as a header
+        # because the request goes to api.scrape.do, not naukri.com directly
+        if self.scrape_do_token and self.session:
+            cookie_str = "; ".join(
+                f"{c.name}={c.value}" for c in self.session.cookies
+                if c.domain and "naukri" in c.domain
+            )
+            if cookie_str:
+                if "headers" not in kwargs:
+                    kwargs["headers"] = {}
+                kwargs["headers"]["Cookie"] = cookie_str
+
+        if method.lower() == "get":
+            return self.session.get(wrapped_url, **kwargs)
+        elif method.lower() == "post":
+            return self.session.post(wrapped_url, **kwargs)
+        elif method.lower() == "put":
+            return self.session.put(wrapped_url, **kwargs)
+        return None
+
     def _extract_user_id(self, page_html: str) -> str | None:
         """Extract user ID from the profile page HTML."""
-        # Try to find user ID from page content
         patterns = [
             r'"userId"\s*:\s*"?(\d+)"?',
             r'"user_id"\s*:\s*"?(\d+)"?',
@@ -130,17 +148,23 @@ class NaukriAPIClient:
 
         try:
             time.sleep(random.uniform(1.0, 3.0))
-            response = self.session.get(
+            response = self._make_request(
+                "get",
                 PROFILE_PAGE_URL,
-                timeout=30,
+                timeout=60,
                 allow_redirects=True,
             )
 
+            if response is None:
+                logger.error("[API] No response received")
+                return False
+
             logger.info(f"[API] Profile page status: {response.status_code}")
-            logger.info(f"[API] Final URL: {response.url}")
+            logger.info(f"[API] Response size: {len(response.text)} bytes")
 
             if response.status_code == 403 or "Access Denied" in response.text[:500]:
                 logger.error("[API] Access Denied on profile page")
+                logger.info(f"[API] Snippet: {response.text[:300]}")
                 return False
 
             if response.status_code != 200:
@@ -148,7 +172,8 @@ class NaukriAPIClient:
                 return False
 
             # Check if we're redirected to login
-            if "login" in str(response.url).lower() or "nlogin" in str(response.url).lower():
+            final_url = str(response.url) if hasattr(response, 'url') else ""
+            if "login" in final_url.lower() or "nlogin" in final_url.lower():
                 logger.error("[API] Redirected to login — cookies are invalid")
                 return False
 
@@ -177,12 +202,13 @@ class NaukriAPIClient:
         logger.info("[API] Attempting to update headline via API...")
 
         try:
-            # First, fetch the profile page to get the current headline
+            # Fetch the profile page to get the current headline
             time.sleep(random.uniform(1.0, 3.0))
-            response = self.session.get(PROFILE_PAGE_URL, timeout=30)
+            response = self._make_request("get", PROFILE_PAGE_URL, timeout=60)
 
-            if response.status_code != 200:
-                logger.error(f"[API] Failed to load profile page: {response.status_code}")
+            if response is None or response.status_code != 200:
+                status = response.status_code if response else "No response"
+                logger.error(f"[API] Failed to load profile page: {status}")
                 return False
 
             current_headline = self._extract_headline(response.text)
@@ -226,43 +252,47 @@ class NaukriAPIClient:
         if not self.user_id:
             return False
 
-        url = HEADLINE_API_URL.format(user_id=self.user_id)
+        url = f"https://www.naukri.com/cloudgateway-mynaukri/resman-aggregator-services/v0/users/{self.user_id}/profiles/headline"
         logger.info(f"[API] Trying JSON API: PUT {url}")
 
         try:
             time.sleep(random.uniform(1.0, 2.0))
 
-            payload = {
-                "resumeHeadline": new_headline
-            }
+            payload = {"resumeHeadline": new_headline}
 
             # Try PUT first
-            response = self.session.put(
-                url,
+            response = self._make_request(
+                "put", url,
                 json=payload,
-                timeout=30,
+                timeout=60,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
             )
 
-            logger.info(f"[API] PUT response: {response.status_code}")
-
-            if response.status_code in (200, 201, 204):
+            if response and response.status_code in (200, 201, 204):
                 logger.info("[API] Headline updated via JSON API (PUT)")
                 return True
 
+            logger.info(f"[API] PUT response: {response.status_code if response else 'None'}")
+
             # Try POST
-            response = self.session.post(
-                url,
+            response = self._make_request(
+                "post", url,
                 json=payload,
-                timeout=30,
+                timeout=60,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
             )
 
-            logger.info(f"[API] POST response: {response.status_code}")
-
-            if response.status_code in (200, 201, 204):
+            if response and response.status_code in (200, 201, 204):
                 logger.info("[API] Headline updated via JSON API (POST)")
                 return True
 
-            logger.warning(f"[API] JSON API failed: {response.status_code} - {response.text[:300]}")
+            logger.warning(f"[API] JSON API failed: {response.status_code if response else 'None'}")
             return False
 
         except Exception as e:
@@ -270,7 +300,7 @@ class NaukriAPIClient:
             return False
 
     def _try_form_headline_update(self, new_headline: str) -> bool:
-        """Try updating headline via form-style POST (mimicking browser form submission)."""
+        """Try updating headline via form-style POST."""
         url = "https://www.naukri.com/mnjuser/profile"
         logger.info(f"[API] Trying form POST to {url}")
 
@@ -282,24 +312,19 @@ class NaukriAPIClient:
                 "action": "saveHeadline",
             }
 
-            response = self.session.post(
-                url,
+            response = self._make_request(
+                "post", url,
                 data=payload,
-                timeout=30,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
+                timeout=60,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
 
-            logger.info(f"[API] Form POST response: {response.status_code}")
-
-            if response.status_code in (200, 201, 204, 302):
-                # Check if the response indicates success
+            if response and response.status_code in (200, 201, 204, 302):
                 if response.status_code == 302 or "success" in response.text.lower():
                     logger.info("[API] Headline updated via form POST")
                     return True
 
-            logger.warning(f"[API] Form POST failed: {response.status_code}")
+            logger.warning(f"[API] Form POST failed: {response.status_code if response else 'None'}")
             return False
 
         except Exception as e:
@@ -320,43 +345,35 @@ class NaukriAPIClient:
 
             # Try multipart upload to profile page
             with open(resume_path, "rb") as f:
-                files = {
-                    "file": (resume_path.name, f, "application/pdf"),
-                }
-
-                # Try the profile page upload endpoint
-                response = self.session.post(
+                files = {"file": (resume_path.name, f, "application/pdf")}
+                response = self._make_request(
+                    "post",
                     "https://www.naukri.com/mnjuser/profile",
                     files=files,
                     data={"action": "uploadResume"},
-                    timeout=60,
+                    timeout=120,
                 )
 
-                logger.info(f"[API] Resume upload response: {response.status_code}")
-
-                if response.status_code in (200, 201, 204, 302):
+                if response and response.status_code in (200, 201, 204, 302):
                     logger.info("[API] Resume uploaded successfully!")
                     return True
 
+                logger.info(f"[API] Resume upload response: {response.status_code if response else 'None'}")
+
             # Try the cloudgateway endpoint if user_id is available
             if self.user_id:
-                url = RESUME_UPLOAD_URL.format(user_id=self.user_id)
+                url = f"https://www.naukri.com/cloudgateway-mynaukri/resman-aggregator-services/v0/users/{self.user_id}/profiles/resumeUpload"
                 logger.info(f"[API] Trying cloudgateway upload: {url}")
 
                 with open(resume_path, "rb") as f:
-                    files = {
-                        "file": (resume_path.name, f, "application/pdf"),
-                    }
-
-                    response = self.session.post(
-                        url,
+                    files = {"file": (resume_path.name, f, "application/pdf")}
+                    response = self._make_request(
+                        "post", url,
                         files=files,
-                        timeout=60,
+                        timeout=120,
                     )
 
-                    logger.info(f"[API] Cloudgateway upload response: {response.status_code}")
-
-                    if response.status_code in (200, 201, 204):
+                    if response and response.status_code in (200, 201, 204):
                         logger.info("[API] Resume uploaded via cloudgateway!")
                         return True
 
