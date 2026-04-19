@@ -68,8 +68,8 @@ class NaukriUpdater:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
         
-        # Fix for HTTP2 protocol errors - use HTTP/1.1
-        chrome_options.add_argument("--disable-http2")
+        # Re-enabling HTTP/2 as modern browsers use it; disabling it can be a bot signal
+        # chrome_options.add_argument("--disable-http2")
         
         # Additional anti-detection
         chrome_options.add_argument("--disable-extensions")
@@ -79,11 +79,16 @@ class NaukriUpdater:
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-running-insecure-content")
         
-        # Realistic modern user agent (Chrome 133 as of Feb 2026)
+        # Modern realistic User Agent (reflecting April 2026 version: Chrome 147)
         chrome_options.add_argument(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         )
+        
+        # Client Hints (essential for modern anti-bot bypass)
+        chrome_options.add_argument('--sec-ch-ua="Google Chrome";v="147", "Chromium";v="147", "Not(A:Brand)";v="24"')
+        chrome_options.add_argument('--sec-ch-ua-mobile=?0')
+        chrome_options.add_argument('--sec-ch-ua-platform="Windows"')
         
         # Language and accept headers
         chrome_options.add_argument("--lang=en-US,en")
@@ -92,13 +97,47 @@ class NaukriUpdater:
         # Selenium 4.6+ automatically manages ChromeDriver via built-in Selenium Manager
         self.driver = webdriver.Chrome(options=chrome_options)
         
-        # Execute stealth scripts to avoid detection
+        # Execute comprehensive stealth scripts to mask automation and match modern Chrome behavior
         self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """
+                // Overwrite the 'webdriver' property
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+
+                // Overwrite the 'plugins' property
+                Object.defineProperty(navigator, 'plugins', {get: () => [
+                    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer' }
+                ]});
+
+                // Overwrite languages
                 Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                window.chrome = {runtime: {}};
+
+                // Spoof Chrome-specific properties
+                window.chrome = {
+                    runtime: {},
+                    app: {
+                        isInstalled: false,
+                        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                        RunningState: { CANNOT_RUN: 'cannot_run', RUNNING: 'running', CAN_RUN: 'can_run' }
+                    },
+                    loadTimes: () => ({}),
+                    csi: () => ({})
+                };
+
+                // Spoof hardwareConcurrency and deviceMemory
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+                // Mock WebGL fingerprints (basic)
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) return 'Intel Inc.';
+                    if (parameter === 37446) return 'Intel(R) Iris(TM) Plus Graphics 640';
+                    return getParameter.apply(this, arguments);
+                };
             """
         })
 
@@ -200,13 +239,16 @@ class NaukriUpdater:
             # Navigate to the dashboard (less guarded than direct profile access)
             logger.info("Navigating to user dashboard to verify session...")
             try:
+                # Add a brief human-like pause before navigation
+                time.sleep(random.uniform(2.0, 4.0))
                 self.driver.get("https://www.naukri.com/mnjuser/homepage")
-                time.sleep(random.uniform(5.0, 8.0))
+                # Longer wait for dynamic content to load on dashboard
+                time.sleep(random.uniform(7.0, 10.0))
             except Exception as e:
                 logger.warning(f"Dashboard navigation error: {e}")
                 # Try generic user area instead
                 self.driver.get("https://www.naukri.com/mnjuser/homepage")
-                time.sleep(5)
+                time.sleep(10)
             
             # Check for Access Denied immediately
             page_title = self.driver.title
@@ -215,10 +257,17 @@ class NaukriUpdater:
                 snippet = self.driver.page_source[:300].replace('\n', ' ')
                 logger.info(f"Page content snippet: {snippet}")
                 
-                logger.info("Attempting a human-like wait and refresh...")
-                time.sleep(random.uniform(10.0, 15.0))
-                self.driver.refresh()
-                time.sleep(5)
+                logger.info("Access Denied! Attempting to navigate back to Home and try again...")
+                self.driver.get(config.NAUKRI_HOME_URL)
+                time.sleep(random.uniform(15.0, 20.0))
+                
+                # Check if we can see the "My Naukri" or logout even on home
+                if "logout" in self.driver.page_source.lower() or "my naukri" in self.driver.page_source.lower():
+                    logger.info("Session verified on Home page after Access Denied redirect")
+                else:
+                    logger.info("Attempting one last refresh of the dashboard...")
+                    self.driver.get("https://www.naukri.com/mnjuser/homepage")
+                    time.sleep(10)
 
             self.take_screenshot("after_dashboard_navigation")
             
