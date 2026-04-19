@@ -791,6 +791,22 @@ class NaukriUpdater:
                 logger.error(error)
             return False
 
+        # If Scrape.do proxy is configured, skip Selenium entirely.
+        # Chrome's --proxy-server flag does NOT support authenticated proxies,
+        # so we must use the API client (curl_cffi) which handles auth proxies.
+        if config.SCRAPE_DO_TOKEN:
+            logger.info("Scrape.do proxy configured — using API client directly (Selenium can't do authenticated proxies)")
+            try:
+                from .api_client import NaukriAPIClient
+                api_client = NaukriAPIClient()
+                return api_client.run(mode=mode)
+            except ImportError:
+                logger.error("curl_cffi is not installed. Run: pip install curl_cffi")
+                return False
+            except Exception as e:
+                logger.error(f"API client failed: {e}")
+                return False
+
         success = False
         logged_in = False
         selenium_failed = False
