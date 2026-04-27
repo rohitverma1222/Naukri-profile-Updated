@@ -1,10 +1,7 @@
 # Naukri Profile Automation Dependencies
 
-# Selenium for browser automation
-selenium>=4.15.0
-
-# Automatic ChromeDriver management
-webdriver-manager>=4.0.1
+# Selenium for browser automation (4.25+ has reliable built-in driver management)
+selenium>=4.25.0
 
 # Environment variable management (for local testing)
 python-dotenv>=1.0.0
@@ -14,3 +11,10 @@ schedule>=1.2.0
 
 # Timezone support
 pytz>=2023.3
+
+# Web server for Render health checks (Free tier keep-alive)
+flask>=3.0.0
+gunicorn>=21.2.0
+
+# TLS-impersonated HTTP requests (bypass Akamai on datacenter IPs)
+curl_cffi>=0.7.0

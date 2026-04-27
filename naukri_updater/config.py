@@ -5,6 +5,10 @@ Configuration settings for Naukri Profile Automation Tool
 import os
 import json
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Naukri.com URLs
 NAUKRI_LOGIN_URL = "https://www.naukri.com/nlogin/login"
@@ -17,14 +21,6 @@ NAUKRI_PASSWORD = os.environ.get("NAUKRI_PASSWORD", "")
 
 # Cookie-based authentication (preferred method to bypass OTP)
 NAUKRI_COOKIES_JSON = os.environ.get("NAUKRI_COOKIES", "")
-
-# Email configuration for OTP reading
-EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "")
-EMAIL_APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD", "")
-
-# OTP Settings
-OTP_TIMEOUT = 120  # seconds to wait for OTP
-OTP_POLL_INTERVAL = 5  # seconds between email checks
 
 def get_cookies():
     """Parse cookies from environment variable."""
@@ -41,13 +37,31 @@ PROJECT_ROOT = Path(__file__).parent.parent
 RESUME_DIR = PROJECT_ROOT / "resume"
 RESUME_FILE = RESUME_DIR / "Rohit_Resume_2026.pdf"
 
-# Screenshots directory for debugging
+# Screenshots settings
 SCREENSHOTS_DIR = PROJECT_ROOT / "screenshots"
+# Only enable screenshots if explicitly enabled via environment variable
+SCREENSHOTS_ENABLED = os.environ.get("ENABLE_SCREENSHOTS", "false").lower() == "true"
+if os.environ.get("ENV") == "production" or os.environ.get("RENDER") == "true":
+    # Always False in production unless explicitly overridden
+    if "ENABLE_SCREENSHOTS" not in os.environ:
+        SCREENSHOTS_ENABLED = False
 
 # Selenium settings
 IMPLICIT_WAIT = 15  # seconds
 PAGE_LOAD_TIMEOUT = 60  # seconds
 SCRIPT_TIMEOUT = 60  # seconds
+
+# Scrape.do Proxy (residential proxy to bypass Akamai IP blocks)
+SCRAPE_DO_TOKEN = "8835e4af8d5b4a048f8d3744beaebd7279ef9fd1854"
+
+def get_proxy_url():
+    """Build the Scrape.do proxy URL if token is available."""
+    if SCRAPE_DO_TOKEN:
+        return f"http://{SCRAPE_DO_TOKEN}:render=false@proxy.scrape.do:8080"
+    return None
+
+# Zoho Catalyst SmartBrowz Endpoint
+ZOHO_SMARTBROWZ_ENDPOINT = os.environ.get("ZOHO_SMARTBROWZ_ENDPOINT", "")
 
 # Retry settings
 MAX_RETRIES = 3

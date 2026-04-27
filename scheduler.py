@@ -1,29 +1,20 @@
-"""
-Scheduler for Naukri Profile Updater - Railway Deployment
-
-Schedule:
-  • Resume upload  → once per day at 7:00 AM IST (+ random 1-15 min delay)
-  • Profile update → every 1 hour (+ random 1-15 min delay)
-
-Runs only Monday–Saturday, 6 AM – 6 PM IST.
-This is the entry point for Railway deployment.
-"""
-
 import logging
 import random
 import sys
 import time
+import threading
 from datetime import datetime
 
 import pytz
 import schedule
+from flask import Flask, jsonify
 
 IST = pytz.timezone("Asia/Kolkata")
 
 # Allowed days: Monday(0) to Saturday(5)
-ALLOWED_DAYS = {0, 1, 2, 3, 4, 5}
+ALLOWED_DAYS = {0, 1, 2, 3, 4, 5, 6}
 START_HOUR = 6   # 6 AM IST
-END_HOUR = 18    # 6 PM IST
+END_HOUR = 22    # 10 PM IST
 
 # Morning hour for the daily resume upload
 RESUME_UPLOAD_TIME = "07:00"  # 7 AM IST
@@ -34,6 +25,49 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+# Flask App for Health Checks
+app = Flask(__name__)
+
+@app.route("/")
+@app.route("/health")
+def health_check():
+    """Health check endpoint for Render."""
+    return jsonify({"status": "ok", "time_ist": datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')}), 200
+
+
+def run_manual_update(mode: str):
+    """Helper to run the updater immediately in a separate thread."""
+    try:
+        logger.info(f"[MANUAL] Starting {mode} update via API...")
+        from naukri_updater.main import NaukriUpdater
+        updater = NaukriUpdater()
+        updater.run(mode=mode)
+        logger.info(f"[MANUAL] {mode} update triggered via API completed.")
+    except Exception as e:
+        logger.error(f"[MANUAL] {mode} update failed: {e}")
+
+
+@app.route("/update-resume")
+def update_resume_manual():
+    """Endpoint to manually trigger resume update."""
+    threading.Thread(target=run_manual_update, args=("resume",), daemon=True).start()
+    return jsonify({
+        "status": "triggered",
+        "mode": "resume",
+        "message": "Resume update started in background"
+    }), 202
+
+
+@app.route("/update-profile")
+def update_profile_manual():
+    """Endpoint to manually trigger profile update."""
+    threading.Thread(target=run_manual_update, args=("profile",), daemon=True).start()
+    return jsonify({
+        "status": "triggered",
+        "mode": "profile",
+        "message": "Profile update started in background"
+    }), 202
 
 
 def is_within_allowed_window():
@@ -59,7 +93,7 @@ def _run_with_delay(mode: str):
     logger.info(f"[{mode}] Adding random delay of {delay_minutes} minute(s) before running...")
     time.sleep(delay_seconds)
 
-    # Re-check window after the delay (in case we drifted past 8 PM)
+    # Re-check window after the delay
     if not is_within_allowed_window():
         return
 
@@ -97,11 +131,11 @@ def run_profile_update():
     logger.info(f"Next profile update at: {schedule.next_run()}")
 
 
-def main():
-    """Main scheduler entry point."""
+def run_scheduler():
+    """Main scheduler loop to be run in a background thread."""
     now_ist = datetime.now(IST)
     logger.info("=" * 60)
-    logger.info("Naukri Profile Updater - Railway Scheduler")
+    logger.info("Naukri Profile Updater - Scheduler Thread")
     logger.info(f"  Resume upload : daily at {RESUME_UPLOAD_TIME} IST (+ random 1-15 min delay)")
     logger.info("  Profile update: every 1 hour (+ random 1-15 min delay)")
     logger.info("  Window        : Mon–Sat, 6 AM – 6 PM IST")
@@ -122,8 +156,17 @@ def main():
     logger.info("Scheduler is now running. Waiting for next scheduled job...")
     while True:
         schedule.run_pending()
-        time.sleep(60)  # Check every 60 seconds
+        time.sleep(60)
 
 
 if __name__ == "__main__":
-    main()
+    # Start the scheduler in a background thread
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+
+    # Start the Flask web server (blocks the main thread)
+    # Render provides the PORT environment variable
+    import os
+    port = int(os.environ.get("PORT", 10000))
+    logger.info(f"Starting Flask web server on port {port}...")
+    app.run(host="0.0.0.0", port=port)

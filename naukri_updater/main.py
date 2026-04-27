@@ -15,11 +15,12 @@ Environment Variables:
 import logging
 import sys
 import time
+import argparse
+import random
 from datetime import datetime
 from pathlib import Path
 
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -29,10 +30,9 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     WebDriverException,
 )
-from webdriver_manager.chrome import ChromeDriverManager
+# Selenium 4.6+ has built-in Selenium Manager — no need for webdriver-manager
 
 from . import config
-from .email_otp import EmailOTPReader
 
 # Configure logging
 logging.basicConfig(
@@ -68,8 +68,8 @@ class NaukriUpdater:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
         
-        # Fix for HTTP2 protocol errors - use HTTP/1.1
-        chrome_options.add_argument("--disable-http2")
+        # Re-enabling HTTP/2 as modern browsers use it; disabling it can be a bot signal
+        # chrome_options.add_argument("--disable-http2")
         
         # Additional anti-detection
         chrome_options.add_argument("--disable-extensions")
@@ -79,26 +79,81 @@ class NaukriUpdater:
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-running-insecure-content")
         
-        # Realistic user agent
+        # Modern realistic User Agent (reflecting April 2026 version: Chrome 147)
         chrome_options.add_argument(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         )
+        
+        # Client Hints (essential for modern anti-bot bypass)
+        chrome_options.add_argument('--sec-ch-ua="Google Chrome";v="147", "Chromium";v="147", "Not(A:Brand)";v="24"')
+        chrome_options.add_argument('--sec-ch-ua-mobile=?0')
+        chrome_options.add_argument('--sec-ch-ua-platform="Windows"')
         
         # Language and accept headers
         chrome_options.add_argument("--lang=en-US,en")
         chrome_options.add_argument("--accept-lang=en-US,en;q=0.9")
 
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Proxy configuration (Scrape.do residential proxy to bypass Akamai)
+        proxy_url = config.get_proxy_url()
+        if proxy_url:
+            chrome_options.add_argument(f"--proxy-server={proxy_url}")
+            logger.info("Scrape.do residential proxy enabled")
+        else:
+            logger.info("No proxy configured (running direct)")
+
+        # Selenium 4.6+ automatically manages ChromeDriver via built-in Selenium Manager
+        if config.ZOHO_SMARTBROWZ_ENDPOINT:
+            logger.info("Using Zoho Catalyst SmartBrowz remote webdriver...")
+            self.driver = webdriver.Remote(
+                command_executor=config.ZOHO_SMARTBROWZ_ENDPOINT,
+                options=chrome_options
+            )
+        else:
+            logger.info("Using local Chrome WebDriver...")
+            self.driver = webdriver.Chrome(options=chrome_options)
         
-        # Execute stealth scripts to avoid detection
+        # Execute comprehensive stealth scripts to mask automation and match modern Chrome behavior
         self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """
+                // Overwrite the 'webdriver' property
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+
+                // Overwrite the 'plugins' property
+                Object.defineProperty(navigator, 'plugins', {get: () => [
+                    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'PDF Viewer', filename: 'internal-pdf-viewer' },
+                    { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer' }
+                ]});
+
+                // Overwrite languages
                 Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                window.chrome = {runtime: {}};
+
+                // Spoof Chrome-specific properties
+                window.chrome = {
+                    runtime: {},
+                    app: {
+                        isInstalled: false,
+                        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                        RunningState: { CANNOT_RUN: 'cannot_run', RUNNING: 'running', CAN_RUN: 'can_run' }
+                    },
+                    loadTimes: () => ({}),
+                    csi: () => ({})
+                };
+
+                // Spoof hardwareConcurrency and deviceMemory
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+                // Mock WebGL fingerprints (basic)
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) return 'Intel Inc.';
+                    if (parameter === 37446) return 'Intel(R) Iris(TM) Plus Graphics 640';
+                    return getParameter.apply(this, arguments);
+                };
             """
         })
 
@@ -113,15 +168,26 @@ class NaukriUpdater:
         logger.info("Chrome WebDriver initialized successfully")
 
     def take_screenshot(self, name: str):
-        """Take a screenshot for debugging purposes."""
+        """Take a screenshot and save page source for debugging purposes."""
+        if not config.SCREENSHOTS_ENABLED:
+            return
+            
         try:
             config.SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = config.SCREENSHOTS_DIR / f"{name}_{timestamp}.png"
-            self.driver.save_screenshot(str(filepath))
-            logger.info(f"Screenshot saved: {filepath}")
+            
+            # Save screenshot
+            screenshot_path = config.SCREENSHOTS_DIR / f"{name}_{timestamp}.png"
+            self.driver.save_screenshot(str(screenshot_path))
+            
+            # Save page source
+            source_path = config.SCREENSHOTS_DIR / f"{name}_{timestamp}.html"
+            with open(source_path, "w", encoding="utf-8") as f:
+                f.write(self.driver.page_source)
+                
+            logger.info(f"Debug files saved: {name}_{timestamp} (.png and .html)")
         except Exception as e:
-            logger.warning(f"Failed to take screenshot: {e}")
+            logger.warning(f"Failed to save debug info: {e}")
 
     def load_cookies(self) -> bool:
         """Load cookies from environment variable to bypass login."""
@@ -186,20 +252,40 @@ class NaukriUpdater:
             except Exception as js_err:
                 logger.debug(f"JS cookie setting failed: {js_err}")
             
-            self.take_screenshot("after_adding_cookies")
-            
-            # Navigate directly to profile (skip refresh to avoid timeout)
-            logger.info("Navigating directly to profile page...")
+            # Navigate to the dashboard (less guarded than direct profile access)
+            logger.info("Navigating to user dashboard to verify session...")
             try:
-                self.driver.get(config.NAUKRI_PROFILE_URL)
-                time.sleep(5)
-            except Exception as e:
-                logger.warning(f"Profile navigation error: {e}")
-                # Try homepage instead
+                # Add a brief human-like pause before navigation
+                time.sleep(random.uniform(2.0, 4.0))
                 self.driver.get("https://www.naukri.com/mnjuser/homepage")
-                time.sleep(5)
+                # Longer wait for dynamic content to load on dashboard
+                time.sleep(random.uniform(7.0, 10.0))
+            except Exception as e:
+                logger.warning(f"Dashboard navigation error: {e}")
+                # Try generic user area instead
+                self.driver.get("https://www.naukri.com/mnjuser/homepage")
+                time.sleep(10)
             
-            self.take_screenshot("after_profile_navigation")
+            # Check for Access Denied immediately
+            page_title = self.driver.title
+            if "Access Denied" in page_title or "Access Denied" in self.driver.page_source:
+                logger.warning(f"Access Denied detected on dashboard load. Title: {page_title}")
+                snippet = self.driver.page_source[:300].replace('\n', ' ')
+                logger.info(f"Page content snippet: {snippet}")
+                
+                logger.info("Access Denied! Attempting to navigate back to Home and try again...")
+                self.driver.get(config.NAUKRI_HOME_URL)
+                time.sleep(random.uniform(15.0, 20.0))
+                
+                # Check if we can see the "My Naukri" or logout even on home
+                if "logout" in self.driver.page_source.lower() or "my naukri" in self.driver.page_source.lower():
+                    logger.info("Session verified on Home page after Access Denied redirect")
+                else:
+                    logger.info("Attempting one last refresh of the dashboard...")
+                    self.driver.get("https://www.naukri.com/mnjuser/homepage")
+                    time.sleep(10)
+
+            self.take_screenshot("after_dashboard_navigation")
             
             # Check if we're logged in by looking at the page content
             current_url = self.driver.current_url
@@ -250,202 +336,39 @@ class NaukriUpdater:
             self.take_screenshot("cookie_auth_error")
             return False
 
-    def find_element_with_fallback(self, selectors: list, description: str):
-        """Try multiple selectors to find an element."""
-        for selector in selectors:
-            try:
-                if selector.startswith("//"):
-                    # XPath selector
-                    element = self.driver.find_element(By.XPATH, selector)
-                else:
-                    # CSS selector
-                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                if element:
-                    logger.info(f"Found {description} with selector: {selector}")
-                    return element
-            except NoSuchElementException:
-                continue
-            except Exception as e:
-                logger.debug(f"Selector {selector} failed: {e}")
-                continue
-        return None
-
-    def detect_otp_page(self) -> bool:
-        """Detect if we're on an OTP verification page."""
+    def find_element_with_fallback(self, selectors: list, description: str, timeout: int = 5):
+        """Try multiple selectors to find an element with a shorter per-selector timeout."""
+        # Temporarily reduce implicit wait to make fallback faster
+        self.driver.implicitly_wait(2)
+        
         try:
-            page_source = self.driver.page_source.lower()
-            current_url = self.driver.current_url.lower()
-            
-            # Check for OTP indicators in page
-            otp_indicators = [
-                'otp',
-                'verification code',
-                'verify your',
-                'one time password',
-                'enter the code',
-                'we have sent',
-                'verify otp'
-            ]
-            
-            for indicator in otp_indicators:
-                if indicator in page_source:
-                    logger.info(f"Detected OTP page (found: '{indicator}')")
-                    return True
-            
-            # Check URL for OTP patterns
-            if 'otp' in current_url or 'verify' in current_url:
-                logger.info("Detected OTP page from URL")
-                return True
-            
-            # Check for OTP input field
-            otp_input_selectors = [
-                "input[placeholder*='OTP']",
-                "input[placeholder*='otp']",
-                "input[name*='otp']",
-                "input[id*='otp']",
-                "input[type='tel']",
-                "input[maxlength='6']",
-            ]
-            
-            for selector in otp_input_selectors:
+            for selector in selectors:
                 try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if elements:
-                        logger.info(f"Detected OTP input field: {selector}")
-                        return True
-                except:
+                    if selector.startswith("//"):
+                        element = self.driver.find_element(By.XPATH, selector)
+                    else:
+                        element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    
+                    if element and element.is_displayed():
+                        logger.info(f"Found {description} with selector: {selector}")
+                        return element
+                except NoSuchElementException:
                     continue
-            
-            return False
-            
-        except Exception as e:
-            logger.warning(f"Error detecting OTP page: {e}")
-            return False
-
-    def handle_otp(self) -> bool:
-        """Handle OTP verification by reading OTP from email."""
-        logger.info("=" * 50)
-        logger.info("OTP Verification Required")
-        logger.info("=" * 50)
-        
-        # Check if email credentials are configured
-        if not config.EMAIL_ADDRESS or not config.EMAIL_APP_PASSWORD:
-            logger.error("Email credentials not configured for OTP reading!")
-            logger.error("Set EMAIL_ADDRESS and EMAIL_APP_PASSWORD secrets")
-            return False
-        
-        self.take_screenshot("otp_page_detected")
-        
-        # Wait a moment for OTP email to arrive
-        logger.info("Waiting for OTP email to arrive...")
-        time.sleep(10)  # Give Naukri time to send the email
-        
-        # Initialize email OTP reader
-        email_reader = EmailOTPReader(
-            email_address=config.EMAIL_ADDRESS,
-            app_password=config.EMAIL_APP_PASSWORD
-        )
-        
-        try:
-            # Try to get OTP from email
-            logger.info(f"Checking email for OTP (timeout: {config.OTP_TIMEOUT}s)...")
-            otp = email_reader.wait_for_otp(
-                sender_filter="naukri",
-                timeout_seconds=config.OTP_TIMEOUT,
-                poll_interval=config.OTP_POLL_INTERVAL
-            )
-            
-            if not otp:
-                logger.error("Could not get OTP from email")
-                self.take_screenshot("otp_not_found")
-                return False
-            
-            logger.info(f"Got OTP from email: {otp}")
-            
-            # Find OTP input field
-            otp_input_selectors = [
-                "input[placeholder*='OTP']",
-                "input[placeholder*='otp']",
-                "input[name*='otp']",
-                "input[id*='otp']",
-                "input[type='tel']",
-                "input[maxlength='6']",
-                "input[type='number']",
-            ]
-            
-            otp_input = self.find_element_with_fallback(otp_input_selectors, "OTP input")
-            
-            if not otp_input:
-                # Try to find any visible input
-                try:
-                    inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='tel'], input[type='number']")
-                    for inp in inputs:
-                        if inp.is_displayed():
-                            otp_input = inp
-                            break
-                except:
-                    pass
-            
-            if not otp_input:
-                logger.error("Could not find OTP input field")
-                self.take_screenshot("otp_input_not_found")
-                return False
-            
-            # Enter OTP
-            logger.info("Entering OTP...")
-            otp_input.clear()
-            otp_input.send_keys(otp)
-            time.sleep(1)
-            
-            self.take_screenshot("otp_entered")
-            
-            # Find and click verify/submit button
-            verify_button_selectors = [
-                "button[type='submit']",
-                "button:contains('Verify')",
-                "button:contains('Submit')",
-                "button[class*='verify']",
-                "button[class*='submit']",
-                "//button[contains(text(), 'Verify')]",
-                "//button[contains(text(), 'Submit')]",
-                "//button[@type='submit']",
-            ]
-            
-            verify_button = self.find_element_with_fallback(verify_button_selectors, "verify button")
-            
-            if verify_button:
-                logger.info("Clicking verify button...")
-                verify_button.click()
-                time.sleep(5)
-            else:
-                # Try pressing Enter
-                logger.info("No verify button found, pressing Enter...")
-                otp_input.send_keys("\n")
-                time.sleep(5)
-            
-            self.take_screenshot("after_otp_submit")
-            
-            # Check if OTP was successful
-            current_url = self.driver.current_url.lower()
-            if 'login' not in current_url and 'otp' not in current_url and 'verify' not in current_url:
-                logger.info("OTP verification successful!")
-                return True
-            
-            # Check for errors
-            page_source = self.driver.page_source.lower()
-            if 'invalid' in page_source or 'wrong' in page_source or 'expired' in page_source:
-                logger.error("OTP verification failed - invalid or expired OTP")
-                return False
-            
-            logger.info("OTP submitted, assuming success")
-            return True
-            
-        except Exception as e:
-            logger.error(f"OTP handling failed: {e}")
-            self.take_screenshot("otp_error")
-            return False
+                except Exception:
+                    continue
+            return None
         finally:
-            email_reader.disconnect()
+            # Restore original implicit wait
+            self.driver.implicitly_wait(config.IMPLICIT_WAIT)
+
+    def scroll_to_element(self, element):
+        """Scroll element into view."""
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Failed to scroll to element: {e}")
+
 
     def login(self) -> bool:
         """Log in to Naukri.com."""
@@ -544,15 +467,6 @@ class NaukriUpdater:
             # Take screenshot after login attempt
             self.take_screenshot("after_login")
 
-            # Check if we hit an OTP page
-            if self.detect_otp_page():
-                logger.info("OTP verification detected, handling...")
-                if not self.handle_otp():
-                    logger.error("OTP verification failed")
-                    return False
-                # Re-check URL after OTP
-                time.sleep(3)
-
             # Check if login was successful
             current_url = self.driver.current_url
             logger.info(f"Current URL after login: {current_url}")
@@ -590,16 +504,40 @@ class NaukriUpdater:
             return False
 
     def navigate_to_profile(self) -> bool:
-        """Navigate to the profile page."""
+        """Navigate to the profile page with smart redundancy check."""
+        current_url = self.driver.current_url
+        if config.NAUKRI_PROFILE_URL in current_url:
+            logger.info("Already on profile page, checking for stability...")
+            
+            # Check for 'Access Denied' even if URL is correct
+            if "Access Denied" in self.driver.title:
+                logger.warning("Page shows Access Denied! Attempting to re-load via Home...")
+                self.driver.get(config.NAUKRI_HOME_URL)
+                time.sleep(random.uniform(3.0, 5.0))
+                self.driver.get(config.NAUKRI_PROFILE_URL)
+                time.sleep(5)
+            else:
+                return True
+
         logger.info("Navigating to profile page...")
-
         try:
+            # Mimic human scroll before navigation if on homepage
+            if "homepage" in self.driver.current_url:
+                self.driver.execute_script("window.scrollTo(0, 300);")
+                time.sleep(2)
+
             self.driver.get(config.NAUKRI_PROFILE_URL)
-            time.sleep(3)
+            time.sleep(random.uniform(5.0, 8.0))
 
-            logger.info(f"Current URL: {self.driver.current_url}")
+            current_url = self.driver.current_url
+            logger.info(f"Current URL: {current_url}")
 
-            if "profile" in self.driver.current_url.lower():
+            if "profile" in current_url.lower():
+                if "Access Denied" in self.driver.title:
+                    logger.error("Access Denied on profile page load")
+                    snippet = self.driver.page_source[:300].replace('\n', ' ')
+                    logger.info(f"Page content snippet: {snippet}")
+                    return False
                 logger.info("Successfully navigated to profile page")
                 return True
             else:
@@ -749,9 +687,13 @@ class NaukriUpdater:
 
             if not edit_btn:
                 logger.warning("Could not find headline edit button")
+                # Log current URL and title for context
+                logger.info(f"URL: {self.driver.current_url} | Title: {self.driver.title}")
                 self.take_screenshot("no_headline_edit_btn")
                 return False
 
+            # Scroll to button and click
+            self.scroll_to_element(edit_btn)
             edit_btn.click()
             time.sleep(2)
             self.take_screenshot("headline_edit_opened")
@@ -857,63 +799,96 @@ class NaukriUpdater:
                 logger.error(error)
             return False
 
+        # If Scrape.do proxy is configured, skip Selenium entirely.
+        # Chrome's --proxy-server flag does NOT support authenticated proxies,
+        # so we must use the API client (curl_cffi) which handles auth proxies.
+        if config.SCRAPE_DO_TOKEN:
+            logger.info("Scrape.do proxy configured — using API client directly (Selenium can't do authenticated proxies)")
+            try:
+                from .api_client import NaukriAPIClient
+                api_client = NaukriAPIClient()
+                return api_client.run(mode=mode)
+            except ImportError:
+                logger.error("curl_cffi is not installed. Run: pip install curl_cffi")
+                return False
+            except Exception as e:
+                logger.error(f"API client failed: {e}")
+                return False
+
         success = False
         logged_in = False
+        selenium_failed = False
 
         try:
             # Setup browser
             self.setup_driver()
 
-            # Try cookie-based authentication first (bypasses OTP)
+            # Try cookie-based authentication first (bypasses login)
             if config.use_cookie_auth():
-                logger.info("Cookie authentication is available, trying it first...")
+                logger.info("Cookie authentication is available, trying it...")
                 logged_in = self.load_cookies()
-                if logged_in:
-                    logger.info("Successfully authenticated using cookies!")
-                else:
-                    logger.warning("Cookie authentication failed, will try password login...")
-
-            # Fall back to password login if cookies didn't work
-            if not logged_in:
-                if config.NAUKRI_EMAIL and config.NAUKRI_PASSWORD:
-                    logger.info("Attempting password-based login...")
-                    if not self.login():
-                        logger.error("Login failed, aborting...")
-                        return False
-                    logged_in = True
-                else:
-                    logger.error("No valid authentication method available!")
+                if not logged_in:
+                    logger.warning("Cookie authentication via Selenium failed!")
+                    selenium_failed = True
+            elif config.NAUKRI_EMAIL and config.NAUKRI_PASSWORD:
+                logger.info("Attempting password-based login...")
+                if not self.login():
+                    logger.error("Login failed, aborting...")
                     return False
-
-            # Navigate to profile (if not already there from cookie auth)
-            if not self.navigate_to_profile():
-                logger.error("Failed to navigate to profile, aborting...")
+                logged_in = True
+            else:
+                logger.error("No valid authentication method available! Provide cookies or credentials.")
                 return False
 
-            # ---- Resume update (daily) ----
-            if mode in ("all", "resume"):
-                if self.update_resume():
-                    success = True
-                    logger.info("Resume update completed successfully!")
+            if logged_in:
+                # Ensure we're on the profile page
+                if not self.navigate_to_profile():
+                    logger.warning("Failed to navigate to profile via Selenium")
+                    selenium_failed = True
                 else:
-                    logger.error("Resume update failed")
+                    # ---- Resume update (daily) ----
+                    if mode in ("all", "resume"):
+                        if self.update_resume():
+                            success = True
+                            logger.info("Resume update completed successfully!")
+                        else:
+                            logger.error("Resume update failed")
 
-            # ---- Profile / headline update (hourly) ----
-            if mode in ("all", "profile"):
-                if self.update_headline():
-                    success = True
-                    logger.info("Profile headline update completed successfully!")
-                else:
-                    logger.warning("Profile headline update failed (non-critical)")
+                    # ---- Profile / headline update (hourly) ----
+                    if mode in ("all", "profile"):
+                        if self.update_headline():
+                            success = True
+                            logger.info("Profile headline update completed successfully!")
+                        else:
+                            logger.warning("Profile headline update failed (non-critical)")
 
         except WebDriverException as e:
             logger.error(f"WebDriver error: {e}")
             self.take_screenshot("webdriver_error")
+            selenium_failed = True
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
             self.take_screenshot("unexpected_error")
+            selenium_failed = True
         finally:
             self.cleanup()
+
+        # ── API Fallback ──
+        # If Selenium failed (e.g. Access Denied from Akamai on datacenter IPs),
+        # try direct HTTP API calls with TLS impersonation.
+        if selenium_failed and not success:
+            logger.info("=" * 50)
+            logger.info("Selenium approach failed — trying API fallback with curl_cffi...")
+            logger.info("=" * 50)
+            try:
+                from .api_client import NaukriAPIClient
+                api_client = NaukriAPIClient()
+                success = api_client.run(mode=mode)
+            except ImportError:
+                logger.error("curl_cffi is not installed. Cannot use API fallback.")
+                logger.error("Install it with: pip install curl_cffi")
+            except Exception as e:
+                logger.error(f"API fallback also failed: {e}")
 
         logger.info("=" * 50)
         logger.info(f"Update completed. Mode: {mode} | Success: {success}")
@@ -924,8 +899,17 @@ class NaukriUpdater:
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Naukri Profile Automation Tool")
+    parser.add_argument(
+        "--mode", 
+        choices=["all", "resume", "profile"], 
+        default="all",
+        help="Update mode: 'resume', 'profile', or 'all' (default)"
+    )
+    args = parser.parse_args()
+
     updater = NaukriUpdater()
-    success = updater.run()
+    success = updater.run(mode=args.mode)
     sys.exit(0 if success else 1)
 
 

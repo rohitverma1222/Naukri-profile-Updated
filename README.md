@@ -64,6 +64,7 @@ cp .env.example .env
 | `NAUKRI_PASSWORD`    | Fallback | Naukri login password                    |
 | `EMAIL_ADDRESS`      | Optional | Gmail for OTP reading                    |
 | `EMAIL_APP_PASSWORD` | Optional | Gmail app password for OTP               |
+| `ENABLE_SCREENSHOTS` | Optional | Set to `true` to enable debug screenshots|
 
 ### 3. Export Cookies (Recommended)
 
@@ -79,7 +80,13 @@ This exports your Naukri session cookies to bypass login/OTP entirely.
 python scheduler.py
 ```
 
-### 5. Deploy to Railway
+### 5. Manual Triggering (API)
+
+When the scheduler is running, you can manually trigger updates via these endpoints:
+- **Resume Update**: `GET http://localhost:10000/update-resume`
+- **Profile Update**: `GET http://localhost:10000/update-profile`
+
+### 6. Deploy to Render
 
 Push to GitHub and connect your repo to [Railway](https://railway.app). Set the environment variables in Railway dashboard.
 

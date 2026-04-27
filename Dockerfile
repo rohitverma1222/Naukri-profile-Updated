@@ -11,6 +11,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg2 \
     unzip \
     curl \
+    # Runtime libraries Chrome needs
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libgbm1 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    fonts-liberation \
+    xdg-utils \
     && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
@@ -28,8 +41,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Create screenshots directory
-RUN mkdir -p screenshots
+# Expose the port for Render
+EXPOSE 10000
 
-# Run the scheduler
+# Run the scheduler & web server
 CMD ["python", "scheduler.py"]
