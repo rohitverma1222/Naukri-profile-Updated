@@ -60,6 +60,9 @@ def get_proxy_url():
         return f"http://{SCRAPE_DO_TOKEN}:render=false@proxy.scrape.do:8080"
     return None
 
+# Zoho Catalyst SmartBrowz Endpoint
+ZOHO_SMARTBROWZ_ENDPOINT = os.environ.get("ZOHO_SMARTBROWZ_ENDPOINT", "")
+
 # Retry settings
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds

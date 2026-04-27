@@ -103,7 +103,15 @@ class NaukriUpdater:
             logger.info("No proxy configured (running direct)")
 
         # Selenium 4.6+ automatically manages ChromeDriver via built-in Selenium Manager
-        self.driver = webdriver.Chrome(options=chrome_options)
+        if config.ZOHO_SMARTBROWZ_ENDPOINT:
+            logger.info("Using Zoho Catalyst SmartBrowz remote webdriver...")
+            self.driver = webdriver.Remote(
+                command_executor=config.ZOHO_SMARTBROWZ_ENDPOINT,
+                options=chrome_options
+            )
+        else:
+            logger.info("Using local Chrome WebDriver...")
+            self.driver = webdriver.Chrome(options=chrome_options)
         
         # Execute comprehensive stealth scripts to mask automation and match modern Chrome behavior
         self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
